@@ -2,13 +2,14 @@
 
 namespace Iquesters\Event\Http\Controllers;
 
-use Illuminate\Http\RedirectResponse;
+use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
 use Illuminate\View\View;
 use Iquesters\Event\Models\Event;
 use Iquesters\Event\Models\EventRegistration;
 use Iquesters\Event\Support\EventAccess;
+use Iquesters\Event\Support\EventFeedback;
 use Iquesters\Event\Support\EventRegistrar;
 use Iquesters\Organisation\Support\OrganisationAccess;
 use Iquesters\Organisation\Support\OrganisationContext;
@@ -19,7 +20,7 @@ use Iquesters\Organisation\Support\OrganisationContext;
  */
 class EventController extends Controller
 {
-    public function __construct(private EventRegistrar $registrar, private OrganisationContext $context) {}
+    public function __construct(private EventRegistrar $registrar, private OrganisationContext $context, private EventFeedback $feedback) {}
 
     public function index(Request $request): View
     {
@@ -61,10 +62,13 @@ class EventController extends Controller
             'closedReason' => $event->registrationClosedReason(),
             'mayRegister' => EventAccess::mayRegister($user, $event),
             'canManage' => EventAccess::canManageEvent($user, $event),
+            'feedbackClosed' => $this->feedback->closedReason($user, $event),
+            'rating' => $event->isPast() ? $this->feedback->summary($event) : null,
         ]);
     }
 
-    public function register(Request $request, string $uid): RedirectResponse
+    /** The registration form (form schema event-registration) posts here. */
+    public function register(Request $request, string $uid): JsonResponse
     {
         $event = $this->find($request, $uid);
         $validated = $request->validate([
@@ -75,18 +79,26 @@ class EventController extends Controller
         try {
             $this->registrar->register($request->user(), $event, (int) ($validated['guests'] ?? 0), $validated['note'] ?? null);
         } catch (\DomainException $e) {
-            return back()->with('error', $e->getMessage());
+            return response()->json(['success' => false, 'message' => $e->getMessage()], 422);
         }
 
-        return redirect()->route('events.show', $event->uid)->with('success', "You're registered.");
+        return $this->done($event, "You're registered.");
     }
 
-    public function cancel(Request $request, string $uid): RedirectResponse
+    public function cancel(Request $request, string $uid): JsonResponse
     {
         $event = $this->find($request, $uid);
         $this->registrar->cancel($request->user(), $event);
 
-        return redirect()->route('events.show', $event->uid)->with('success', 'Your registration is cancelled.');
+        return $this->done($event, 'Your registration is cancelled.');
+    }
+
+    /** The form engine follows redirect_url; the event page then shows the message. */
+    private function done(Event $event, string $message): JsonResponse
+    {
+        session()->flash('success', $message);
+
+        return response()->json(['success' => true, 'message' => $message, 'redirect_url' => route('events.show', $event->uid)]);
     }
 
     /** An event the user may not see looks like a missing one. */

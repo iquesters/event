@@ -6,8 +6,8 @@ Events for organisations built on the iquesters modules: admins publish events, 
 
 | Step | What | State |
 |---|---|---|
-| 1 | Events, members-only or public, registration with places and a deadline, attendees and CSV | **This release** |
-| 2 | Feedback and ratings (question sets, a QR poster for the venue, results) | Planned |
+| 1 | Events, members-only or public, registration with places and a deadline, attendees and CSV | **Done** |
+| 2 | Feedback and ratings (question sets, a QR poster for the venue, results) | **Done** |
 | 3 | Paid tickets (prices and coupons from `iquesters/product`) | Planned |
 | 4 | Check-in at the door, reminders by email | Planned |
 

@@ -25,3 +25,13 @@ Open an event to see the details and how many places are left. Press **Register*
 ## Public events
 
 A public event has its own page at `/e/the-event-name`, which anyone can open, e.g. from your website. To register, people sign in.
+
+## Feedback and ratings
+
+**For admins:** on the event, switch on **Ask attendees for feedback** (and, if you like, **Attendees may stay anonymous**). The questions start from the event type's set.
+- **Questions:** change, reorder or remove them; choose rating (1–5 stars), yes / no or text, and whether an answer is required. **Use the … set** puts the type's questions back.
+- **QR poster:** print it (or save it as PDF) and put it up at the venue; scanning it opens the feedback form.
+- **Results:** the overall rating, each question's average and spread, yes / no counts and comments; **CSV** has every response.
+
+**For attendees:** once the event has started, open the event and press **Give feedback** (or scan the poster). You can answer once.
+

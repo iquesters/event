@@ -2,6 +2,7 @@
 
 namespace Iquesters\Event\Database\Seeders;
 
+use Iquesters\Event\Support\EventForms;
 use Iquesters\Foundation\Database\Seeders\BaseSeeder;
 use Iquesters\Foundation\Models\Module;
 use Spatie\Permission\Models\Role;
@@ -39,8 +40,33 @@ class EventSeeder extends BaseSeeder
                 'key' => 'manage',
                 'icon' => 'fas fa-calendar-plus',
                 'label' => 'Manage events',
-                'route' => 'events.manage.index',
                 'permission' => self::MANAGE_PERMISSION,
+                // The generic table: rows from the event module (limited to the organisations managed).
+                'table_schema' => [
+                    'slug' => 'event-manage-table',
+                    'name' => 'Events',
+                    'description' => 'Events of the organisations you manage',
+                    'schema' => [
+                        'entity' => 'events',
+                        'data_url' => '/events/manage/data',
+                        'create' => ['form' => 'event-details', 'label' => 'New event'],
+                        'record' => [
+                            ['form' => 'event-details', 'mode' => 'view'],
+                            ['html' => '/events/manage/{uid}/links'],
+                        ],
+                        'dt-options' => [
+                            'columns' => [
+                                ['data' => 'title', 'title' => 'Event', 'visible' => true, 'link' => true, 'form-schema-uid' => 'event-details'],
+                                ['data' => 'when', 'title' => 'When', 'visible' => true],
+                                ['data' => 'organisation', 'title' => 'Organisation', 'visible' => true],
+                                ['data' => 'status_label', 'title' => 'Status', 'visible' => true],
+                                ['data' => 'registered', 'title' => 'Registered', 'visible' => true],
+                            ],
+                            'options' => ['pageLength' => 25, 'order' => [], 'responsive' => true],
+                        ],
+                        'default_view_mode' => 'inbox',
+                    ],
+                ],
             ],
         ],
     ];
@@ -59,5 +85,8 @@ class EventSeeder extends BaseSeeder
         $roles['member']->givePermissionTo(self::USE_PERMISSION);
 
         Module::where('name', $this->moduleName)->first()?->assignRoles($roles->pluck('id')->all());
+
+        // The module's form schemas (rebuilt on every seed).
+        EventForms::syncAll();
     }
 }

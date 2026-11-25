@@ -58,6 +58,8 @@ class Event extends Model
         'registration_open',
         'capacity',
         'registration_closes_at',
+        'feedback_enabled',
+        'feedback_anonymous',
         'created_by',
         'updated_by',
     ];
@@ -67,6 +69,8 @@ class Event extends Model
         'ends_at' => 'datetime',
         'registration_closes_at' => 'datetime',
         'registration_open' => 'boolean',
+        'feedback_enabled' => 'boolean',
+        'feedback_anonymous' => 'boolean',
         'capacity' => 'integer',
     ];
 
@@ -97,6 +101,21 @@ class Event extends Model
     public function registrations(): HasMany
     {
         return $this->hasMany(EventRegistration::class);
+    }
+
+    public function feedbackQuestions(): HasMany
+    {
+        return $this->hasMany(EventFeedbackQuestion::class)->orderBy('sort')->orderBy('id');
+    }
+
+    public function feedbackResponses(): HasMany
+    {
+        return $this->hasMany(EventFeedbackResponse::class);
+    }
+
+    public function hasStarted(): bool
+    {
+        return $this->starts_at->isPast();
     }
 
     /** Published, not yet over. */

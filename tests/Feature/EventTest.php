@@ -16,8 +16,9 @@ class EventTest extends TestCase
         $organisation = $this->makeOrganisation();
         $this->actingAs($this->memberOf($organisation, 'admin'));
 
-        $this->get('/events/manage/create')->assertOk()->assertSee('TTVians');
-        $this->post('/events/manage', [
+        // The event-details form's organisation options, then its JSON save.
+        $this->getJson('/events/manage/options/organisations')->assertOk()->assertJsonPath('data.1.label', 'TTVians');
+        $this->postJson('/events/manage', [
             'organisation_id' => $organisation->id,
             'title' => 'Annual Reunion 2026',
             'type' => 'Reunion',
@@ -27,12 +28,13 @@ class EventTest extends TestCase
             'status' => 'published',
             'registration_open' => '1',
             'capacity' => 100,
-        ])->assertRedirect();
+        ])->assertCreated();
 
         $event = Event::firstOrFail();
         $this->assertSame('annual-reunion-2026', $event->slug);
         $this->assertSame(Event::STATUS_PUBLISHED, $event->status);
-        $this->get('/events/manage')->assertOk()->assertSee('Annual Reunion 2026');
+        // The Manage events table's rows (data_url).
+        $this->getJson('/events/manage/data')->assertOk()->assertJsonPath('response_schema.data.0.title', 'Annual Reunion 2026');
     }
 
     public function test_admins_manage_only_their_organisations_events(): void
@@ -42,12 +44,12 @@ class EventTest extends TestCase
         $theirs = $this->makeEvent($other, ['title' => 'Beta Gala']);
         $this->actingAs($this->memberOf($mine, 'admin'));
 
-        $this->get('/events/manage')->assertDontSee('Beta Gala');
+        $this->getJson('/events/manage/data')->assertOk()->assertJsonCount(0, 'response_schema.data');
         $this->get("/events/manage/{$theirs->uid}/edit")->assertNotFound();
-        $this->post('/events/manage', [
+        $this->postJson('/events/manage', [
             'organisation_id' => $other->id, 'title' => 'Sneaky', 'starts_at' => now()->addDay()->format('Y-m-d\TH:i'),
             'visibility' => 'members', 'status' => 'draft',
-        ])->assertSessionHasErrors('organisation_id');
+        ])->assertStatus(422)->assertJsonValidationErrors('organisation_id');
 
         $this->actingAs($this->memberOf($mine))->get('/events/manage')->assertForbidden();
     }
@@ -63,15 +65,16 @@ class EventTest extends TestCase
         $this->get('/events')->assertOk()->assertSee('Annual Reunion')->assertDontSee('Secret Draft');
         $this->get("/events/{$event->uid}")->assertOk()->assertSee('10 of 10 places left');
 
-        $this->post("/events/{$event->uid}/register", ['guests' => 2, 'note' => 'Veg'])->assertSessionHas('success');
+        // The registration form (form schema) posts JSON.
+        $this->postJson("/events/{$event->uid}/register", ['guests' => 2, 'note' => 'Veg'])->assertOk()->assertJsonPath('message', "You're registered.");
         $this->assertSame(7, $event->fresh()->seatsLeft());
-        $this->post("/events/{$event->uid}/register")->assertSessionHas('error', "You're already registered.");
+        $this->postJson("/events/{$event->uid}/register")->assertStatus(422)->assertJsonPath('message', "You're already registered.");
 
-        $this->delete("/events/{$event->uid}/register");
+        $this->deleteJson("/events/{$event->uid}/register")->assertOk();
         $this->assertSame(10, $event->fresh()->seatsLeft());
 
         // Registering again after cancelling reuses the registration.
-        $this->post("/events/{$event->uid}/register");
+        $this->postJson("/events/{$event->uid}/register")->assertOk();
         $this->assertSame(1, EventRegistration::count());
     }
 
@@ -111,7 +114,7 @@ class EventTest extends TestCase
         $this->get('/e/'.$event->slug)->assertOk()->assertSee('Annual Reunion')->assertSee('Open to all');
 
         $outsider = $this->makeUser('user');
-        $this->actingAs($outsider)->post("/events/{$event->uid}/register")->assertSessionHas('success');
+        $this->actingAs($outsider)->postJson("/events/{$event->uid}/register")->assertOk();
     }
 
     public function test_attendees_and_csv_export(): void
