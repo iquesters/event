@@ -14,6 +14,7 @@ use Iquesters\Foundation\FoundationServiceProvider;
 use Iquesters\Foundation\Support\ConfProvider;
 use Iquesters\Organisation\Models\Organisation;
 use Iquesters\Organisation\OrganisationServiceProvider;
+use Iquesters\Organisation\Support\OrganisationRoles;
 use Iquesters\UserInterface\UserInterfaceServiceProvider;
 use Laravel\Sanctum\SanctumServiceProvider;
 use Orchestra\Testbench\Attributes\WithMigration;
@@ -94,7 +95,8 @@ abstract class TestCase extends Orchestra
     protected function memberOf(Organisation $organisation, string $role = 'user'): User
     {
         $user = $this->makeUser($role);
-        $user->organisations()->attach($organisation->id);
+        // An "admin" member is org-admin there (per-organisation role); anyone else a member.
+        OrganisationRoles::join($user, $organisation, $role === 'admin' ? 'org-admin' : 'member');
 
         return $user;
     }
