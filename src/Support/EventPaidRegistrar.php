@@ -9,6 +9,8 @@ use Iquesters\Commerce\Models\Order;
 use Iquesters\Commerce\Models\OrderLine;
 use Iquesters\Commerce\Services\OrderService;
 use Iquesters\Commerce\Support\OrderException;
+use Illuminate\Validation\ValidationException;
+use Iquesters\Event\Contracts\MembershipDetails;
 use Iquesters\Event\Models\Event;
 use Iquesters\Event\Models\EventRegistration;
 use Iquesters\Foundation\Support\UserModel;
@@ -16,18 +18,17 @@ use Iquesters\Foundation\System\Traits\Loggable;
 
 /**
  * Paid registration: the registrant and their guests become one commerce
- * order, one line per person (plus a donation):
+ * order, one line per person for the ticket they picked (the event's tickets,
+ * made as commerce products), plus a donation.
  *
- * - an alumnus (the registrant, or a guest who is one): the pass with
- *   membership, unless they already paid the membership for that period
- *   (then the pass);
- * - another guest over the free age: the pass;
- * - a child up to the free age: the free child pass;
- * - crew / invited guests (admins only): the private free pass.
+ * A ticket with a membership needs the person's email (the membership is
+ * theirs) and isn't for someone who already paid that membership. Admins can
+ * also give admin-only tickets (crew, invited guests) and add people without
+ * an account.
  *
- * Each line keeps the person (name, gender, meal, email, phone) in its meta, so
- * community can give alumni their membership when the order is paid. The
- * registration follows its order's status (see syncFromOrder).
+ * Each line keeps the person (name, gender, meal, ticket, email, phone) in its
+ * meta, so community can give them their membership when the order is paid.
+ * The registration follows its order's status (see syncFromOrder).
  */
 class EventPaidRegistrar
 {
@@ -42,35 +43,64 @@ class EventPaidRegistrar
     {
         $genders = array_keys(EventRegistration::GENDERS);
         $meals = array_keys(EventRegistration::MEALS);
+        $codes = array_keys(EventRegistration::PHONE_CODES);
+        // A ticket is chosen only when there is a choice; empty: picked by age and membership.
+        $tickets = array_map(fn ($t) => (string) $t['product']->id, EventProducts::tickets($event, $admin));
+        $phone = ['string', 'max:20', 'regex:/^[0-9 ()-]{5,20}$/'];
+        // The membership module's fields (e.g. school_level, school_year): kept here so
+        // validate() passes them on; that module checks them (people()).
+        $details = app()->bound(MembershipDetails::class) ? app(MembershipDetails::class) : null;
+        $detailRules = [];
+        $donationProduct = EventProducts::donationOffered($event);
+        $donationLimits = $donationProduct ? $donationProduct->amountLimits() : ['min' => 1, 'max' => null];
+        foreach ($details ? array_column($details->fields($event), 'id') : [] as $id) {
+            $detailRules[$id] = ['nullable'];
+            $detailRules['guests.*.'.$id] = ['nullable'];
+        }
 
-        return [
+        return $detailRules + [
             'name' => ['required', 'string', 'max:255'],
-            'phone' => ['required', 'string', 'max:32', 'regex:/^[0-9 +()-]{7,32}$/'],
             'email' => [$admin ? 'nullable' : 'required', 'email', 'max:255'],
+            'phone_code' => ['nullable', Rule::in($codes)],
+            'phone' => ['required', ...$phone],
             'gender' => ['required', Rule::in($genders)],
             'meal' => ['required', Rule::in($meals)],
-            'alumnus' => ['nullable', 'boolean'],
+            'member' => ['nullable', 'boolean'],
+            'ticket' => ['nullable', Rule::in($tickets)],
             'guests' => ['nullable', 'array', 'max:'.(self::MAX_PEOPLE - 1)],
+            'guests.*.member' => ['nullable', 'boolean'],
             'guests.*.name' => ['required', 'string', 'max:255'],
             'guests.*.gender' => ['required', Rule::in($genders)],
             'guests.*.age_group' => ['required', Rule::in(['adult', 'child'])],
             'guests.*.meal' => ['required', Rule::in($meals)],
-            'guests.*.alumnus' => ['nullable', 'boolean'],
-            'guests.*.email' => ['nullable', 'email', 'max:255', 'required_if_accepted:guests.*.alumnus'],
-            'guests.*.phone' => ['nullable', 'string', 'max:32'],
-            'donation' => ['nullable', 'numeric', 'min:0', 'max:10000000'],
+            'guests.*.email' => ['nullable', 'email', 'max:255', 'required_if_accepted:guests.*.member'],
+            'guests.*.phone_code' => ['nullable', Rule::in($codes)],
+            // Every adult guest's mobile (a child's is the registrant's).
+            'guests.*.phone' => [$admin ? 'nullable' : 'required_unless:guests.*.age_group,child', 'nullable', ...$phone],
+            'guests.*.ticket' => ['nullable', Rule::in($tickets)],
+            // Empty: no donation; else within the donation product's limits (₹1 or more when it sets none).
+            'donation' => ['nullable', 'numeric', 'min:'.$donationLimits['min'], 'max:'.($donationLimits['max'] ?? 10000000)],
             'accept_terms' => [$admin ? 'nullable' : 'accepted'],
-            'crew' => ['nullable', 'boolean'],
             'note' => ['nullable', 'string', 'max:500'],
         ];
     }
 
-    public static function messages(): array
+    public static function messages(?Event $event = null): array
     {
+        // The donation's limits in words, e.g. "₹100 or more".
+        $donation = $event ? EventProducts::donationOffered($event) : null;
+        $limits = $donation ? $donation->amountLimitsText() : '₹1 or more';
+
         return [
+            'donation.min' => "A donation is {$limits} (or leave it empty).",
+            'donation.max' => "A donation is {$limits}.",
             'accept_terms.accepted' => 'Please agree to the Terms and the Privacy policy.',
-            'guests.*.email.required_if_accepted' => 'An alumnus guest needs their email (their membership is linked to it).',
-            'phone.regex' => 'Enter a mobile number (digits, + and spaces).',
+            'ticket.in' => 'Choose one of this event\'s tickets.',
+            'guests.*.ticket.in' => 'Choose one of this event\'s tickets.',
+            'phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
+            'guests.*.phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
+            'guests.*.phone.required_unless' => 'Enter this guest’s mobile number.',
+            'guests.*.email.required_if_accepted' => 'A member needs their email: the membership is theirs.',
         ];
     }
 
@@ -105,10 +135,9 @@ class EventPaidRegistrar
         // An admin adds someone: linked to their account when the email has one.
         $userId = $admin ? $this->userIdByEmail($data['email'] ?? null) : (int) $user->getAuthIdentifier();
 
-        $people = $this->people($data);
-        $crew = $admin && ! empty($data['crew']);
+        $people = $this->people($event, $data, $admin);
 
-        $registration = DB::transaction(function () use ($event, $data, $people, $crew, $admin, $by, $userId) {
+        $registration = DB::transaction(function () use ($event, $data, &$people, $admin, $by, $userId) {
             $event = Event::query()->with('organisation')->whereKey($event->id)->lockForUpdate()->firstOrFail();
 
             $existing = $userId ? EventRegistration::query()->where('event_id', $event->id)->where('user_id', $userId)->first() : null;
@@ -156,8 +185,8 @@ class EventPaidRegistrar
                 'name' => $people[0]['name'],
                 'email' => $people[0]['email'],
                 'phone' => $people[0]['phone'],
-            ], $this->items($event, $registration, $people, $crew, $userId, (float) ($data['donation'] ?? 0)), [
-                'prefix' => $event->reference_prefix ?: 'EVT',
+            ], $this->items($event, $registration, $people, $admin, $userId, (float) ($data['donation'] ?? 0)), [
+                // Numbered by commerce (its order_reference_prefix setting).
                 'source' => $admin ? 'admin' : 'event_registration',
                 'ref_type' => 'event_registration',
                 'ref_id' => $registration->id,
@@ -167,6 +196,8 @@ class EventPaidRegistrar
             ]);
 
             $registration->update([
+                // Each person with their ticket's name.
+                'people' => $people,
                 'order_id' => $order->id,
                 'status' => self::statusFor($order->status) ?? EventRegistration::STATUS_AWAITING_PAYMENT,
             ]);
@@ -220,107 +251,198 @@ class EventPaidRegistrar
     }
 
     /**
-     * What each person costs (for the page before paying): role => price.
+     * The tickets people can pick, for the event page.
      *
-     * @return array{pass: ?float, bundle: ?float, child: ?float}
+     * @return array<int, array{name: string, price: float, includes: ?string, left: ?int}> left: null when not limited
      */
     public static function prices(Event $event): array
     {
-        $products = EventProducts::products($event);
+        $all = EventProducts::tickets($event);
+        $sellsMembership = EventProducts::sellsMembership($event);
+        // The tickets people pay for; a bundle with membership isn't a line of its own but
+        // a note on its ticket ("Membership 2027 included" or "with Membership 2027: ₹900").
+        $lines = collect($all)
+            ->filter(fn ($t) => ! $t['bundle'] && $t['product']->isOnSale())
+            ->mapWithKeys(fn ($t) => [(int) $t['product']->id => ['name' => $t['name'], 'price' => (float) $t['product']->price, 'includes' => $t['includes'] ?? null, 'left' => $t['product']->stockLeft(), 'membership' => null]])
+            ->all();
+        foreach ($all as $t) {
+            if (! $t['bundle'] || ! $sellsMembership || ! $t['product']->isOnSale()) {
+                continue;
+            }
+            $ticketId = (int) collect($t['ticket_ids'] ?? [])->first(fn ($id) => isset($lines[(int) $id]));
+            if (! $ticketId || $lines[$ticketId]['membership'] !== null) {
+                continue;
+            }
+            $ticketIds = array_map('intval', $t['ticket_ids'] ?? []);
+            $membership = $t['product']->bundleItems->pluck('product')->filter()
+                ->reject(fn ($p) => in_array((int) $p->id, $ticketIds, true))
+                ->pluck('name')->implode(' + ');
+            $price = (float) $t['product']->price;
+            $lines[$ticketId]['membership'] = [
+                'name' => $membership ?: $t['name'],
+                // null: the same price as the ticket (the membership costs nothing extra).
+                'price' => abs($price - $lines[$ticketId]['price']) < 0.005 ? null : $price,
+            ];
+        }
+
+        return array_values($lines);
+    }
+
+    /**
+     * What the form as filled in so far costs (shown before the terms): each
+     * person's ticket, as the order will pick it, the donation and the total.
+     * Lenient: a half-filled person is priced as an adult without membership.
+     *
+     * @return array{lines: array<int, array{who: string, ticket: ?string, price: ?float}>, donation: float, total: float}
+     */
+    public function quote(Event $event, array $data, ?Authenticatable $user): array
+    {
+        $userId = $user ? (int) $user->getAuthIdentifier() : null;
+        $sellsMembership = EventProducts::sellsMembership($event);
+        $people = [['who' => trim((string) ($data['name'] ?? '')) ?: 'You', 'age_group' => 'adult', 'member' => $sellsMembership, 'email' => $data['email'] ?? null]];
+        foreach (array_values(array_filter((array) ($data['guests'] ?? []), 'is_array')) as $i => $guest) {
+            $age = ($guest['age_group'] ?? 'adult') === 'child' ? 'child' : 'adult';
+            $people[] = [
+                'who' => trim((string) ($guest['name'] ?? '')) ?: 'Guest '.($i + 1),
+                'age_group' => $age,
+                'member' => $sellsMembership && $age === 'adult' && filter_var($guest['member'] ?? false, FILTER_VALIDATE_BOOLEAN),
+                'email' => $guest['email'] ?? null,
+            ];
+        }
+
+        $lines = [];
+        foreach ($people as $index => $person) {
+            $email = ($e = mb_strtolower(trim((string) $person['email']))) !== '' ? $e : null;
+            try {
+                $ticket = EventProducts::choose($event, $person['age_group'], $person['member'], null, false,
+                    fn (int $membershipId) => $this->hasMembership($membershipId, $index === 0 ? $userId : null, $email), $person['who']);
+                $lines[] = ['who' => $person['who'], 'ticket' => $ticket['name'], 'price' => round((float) $ticket['product']->price, 2)];
+            } catch (\DomainException) {
+                $lines[] = ['who' => $person['who'], 'ticket' => null, 'price' => null];
+            }
+        }
+        $donation = EventProducts::donationOffered($event) ? max(0, round((float) ($data['donation'] ?? 0), 2)) : 0.0;
 
         return [
-            'pass' => isset($products['pass']) ? (float) $products['pass']->price : null,
-            'bundle' => isset($products['bundle']) && $products['bundle']->isOnSale() && $products['bundle']->isActive() ? (float) $products['bundle']->price : null,
-            'child' => isset($products['child']) ? (float) $products['child']->price : null,
+            'lines' => $lines,
+            'donation' => $donation,
+            'total' => round(array_sum(array_map(fn ($l) => (float) $l['price'], $lines)) + $donation, 2),
         ];
     }
 
-    /** @return array<int, array{name: string, email: ?string, phone: ?string, gender: string, meal: string, age_group: string, alumnus: bool, role: string}> */
-    private function people(array $data): array
+    /** @return array<int, array{name: string, email: ?string, phone: ?string, gender: string, meal: string, age_group: string, ticket_id: int, role: string}> */
+    private function people(Event $event, array $data, bool $admin = false): array
     {
-        $people = [[
-            'name' => trim((string) $data['name']),
-            'email' => ($e = trim((string) ($data['email'] ?? ''))) !== '' ? mb_strtolower($e) : null,
-            'phone' => ($p = trim((string) ($data['phone'] ?? ''))) !== '' ? $p : null,
-            'gender' => (string) $data['gender'],
-            'meal' => (string) $data['meal'],
-            'age_group' => 'adult',
-            'alumnus' => filter_var($data['alumnus'] ?? false, FILTER_VALIDATE_BOOLEAN),
-            'role' => 'registrant',
-        ]];
-        foreach (array_values((array) ($data['guests'] ?? [])) as $guest) {
-            $child = ($guest['age_group'] ?? 'adult') === 'child';
-            $people[] = [
-                'name' => trim((string) $guest['name']),
-                'email' => ($e = trim((string) ($guest['email'] ?? ''))) !== '' ? mb_strtolower($e) : null,
-                'phone' => ($p = trim((string) ($guest['phone'] ?? ''))) !== '' ? $p : null,
-                'gender' => (string) $guest['gender'],
-                'meal' => (string) $guest['meal'],
-                'age_group' => $child ? 'child' : 'adult',
-                // Children aren't alumni.
-                'alumnus' => ! $child && filter_var($guest['alumnus'] ?? false, FILTER_VALIDATE_BOOLEAN),
-                'role' => 'guest',
+        // Membership details (e.g. the school they completed): checked by the membership module.
+        $details = app()->bound(MembershipDetails::class) ? app(MembershipDetails::class) : null;
+        $fieldIds = $details ? array_column($details->fields($event), 'id') : [];
+        $errors = [];
+
+        $sellsMembership = EventProducts::sellsMembership($event);
+        $person = function (array $p, string $role, string $at) use ($event, $details, $fieldIds, &$errors, $sellsMembership, $admin) {
+            // The person registering joins (no question); a guest when ticked; an admin says for each.
+            $member = $sellsMembership && ($p['age_group'] ?? 'adult') !== 'child'
+                && (($role === 'registrant' && ! $admin) || filter_var($p['member'] ?? false, FILTER_VALIDATE_BOOLEAN));
+            // A member is an adult (the form offers no "Child" after "Joining as a member?" Yes).
+            if ($sellsMembership && ($p['age_group'] ?? 'adult') === 'child' && filter_var($p['member'] ?? false, FILTER_VALIDATE_BOOLEAN)) {
+                $errors[$at.'age_group'] = 'A child can’t join as a member: choose Adult, or answer No to “Joining as a member?”.';
+            }
+            $phone = trim((string) ($p['phone'] ?? ''));
+            $kept = [];
+            if ($member && $details) {
+                [$kept, $fieldErrors] = $details->validate($event, array_intersect_key($p, array_flip($fieldIds)));
+                foreach ($fieldErrors as $field => $message) {
+                    $errors[$at.$field] = $message;
+                }
+            }
+
+            return [
+                'name' => trim((string) $p['name']),
+                'email' => ($e = trim((string) ($p['email'] ?? ''))) !== '' ? mb_strtolower($e) : null,
+                // With its country code: "+91 98000 00001".
+                'phone' => $phone !== '' ? trim(($p['phone_code'] ?? '+91').' '.$phone) : null,
+                'gender' => (string) $p['gender'],
+                'meal' => (string) $p['meal'],
+                'age_group' => ($p['age_group'] ?? 'adult') === 'child' ? 'child' : 'adult',
+                'member' => $member,
+                'member_details' => $kept,
+                'ticket_id' => ! empty($p['ticket']) ? (int) $p['ticket'] : null,
+                'role' => $role,
             ];
+        };
+        $people = [$person($data, 'registrant', '')];
+        foreach (array_values((array) ($data['guests'] ?? [])) as $i => $guest) {
+            $people[] = $person($guest, 'guest', "guests.{$i}.");
         }
         if (count($people) > self::MAX_PEOPLE) {
             throw new \DomainException('At most '.self::MAX_PEOPLE.' people in one registration.');
+        }
+        if ($errors) {
+            throw ValidationException::withMessages($errors);
         }
 
         return $people;
     }
 
-    private function items(Event $event, EventRegistration $registration, array $people, bool $crew, ?int $userId, float $donation): array
+    /**
+     * One line per person: their ticket. A ticket with a membership needs the
+     * person's email (the membership is theirs) and isn't for someone who
+     * already paid that membership.
+     */
+    private function items(Event $event, EventRegistration $registration, array &$people, bool $admin, ?int $userId, float $donation): array
     {
-        $ids = (array) (((array) $event->paid_settings)['products'] ?? []);
-        $require = function (string $role) use ($ids): int {
-            if (empty($ids[$role])) {
-                throw new \DomainException('This event\'s tickets are not set up yet. Please try again later.');
-            }
-
-            return (int) $ids[$role];
-        };
-
         $items = [];
-        $seenEmails = [];
-        foreach ($people as $index => $person) {
-            $meta = array_filter([
+        $seen = [];
+        foreach ($people as $index => &$person) {
+            // By age, and with membership for a member (unless they already have it); or the one they chose.
+            $ticket = EventProducts::choose(
+                $event,
+                $person['age_group'],
+                $person['member'],
+                $person['ticket_id'],
+                $admin,
+                fn (int $membershipId) => $this->hasMembership($membershipId, $index === 0 ? $userId : null, $person['email']),
+                $person['name'],
+            );
+            $person['ticket'] = $ticket['name'];
+            $membershipId = (int) ($ticket['membership_product_id'] ?? 0);
+            $person['with_membership'] = $membershipId > 0;
+            if ($membershipId) {
+                if (! $person['email']) {
+                    throw new \DomainException("{$person['name']}: a ticket with membership needs their email (the membership is theirs).");
+                }
+                if (in_array($person['email'], $seen, true)) {
+                    throw new \DomainException("{$person['email']} is on two tickets with membership.");
+                }
+                if ($this->hasMembership($membershipId, $index === 0 ? $userId : null, $person['email'])) {
+                    throw new \DomainException("{$person['name']} already has this membership: choose a ticket without it.");
+                }
+                $seen[] = $person['email'];
+            }
+            $items[] = ['product' => (int) $ticket['product']->id, 'meta' => array_filter([
                 'person' => $person['name'],
                 'gender' => EventRegistration::GENDERS[$person['gender']] ?? $person['gender'],
                 'meal' => EventRegistration::MEALS[$person['meal']] ?? $person['meal'],
                 'age_group' => $person['age_group'],
+                'ticket' => $ticket['name'],
                 'role' => $person['role'],
                 'email' => $person['email'],
                 'phone' => $person['phone'],
                 'user_id' => $index === 0 ? $userId : null,
                 'event' => $event->uid,
                 'registration' => $registration->uid,
-            ], fn ($v) => $v !== null && $v !== '');
-
-            if ($crew) {
-                $product = $require('crew');
-            } elseif ($person['age_group'] === 'child') {
-                $product = $require('child');
-            } elseif ($person['alumnus'] && ! empty($ids['bundle']) && ! empty($ids['membership'])
-                && ! in_array($person['email'], $seenEmails, true)
-                && ! $this->hasMembership((int) $ids['membership'], $index === 0 ? $userId : null, $person['email'])) {
-                $product = (int) $ids['bundle'];
-                // Community reads these when the order is paid (the membership's approval).
-                $meta['alumnus'] = true;
-                $meta['approval'] = (string) $event->paid('approval');
-                if ($person['email']) {
-                    $seenEmails[] = $person['email'];
-                }
-            } else {
-                $product = $require('pass');
-                if ($person['alumnus']) {
-                    $meta['alumnus'] = true;
-                }
-            }
-            $items[] = ['product' => $product, 'meta' => $meta];
+                // For the membership module (e.g. the school they completed).
+                'member_details' => $membershipId && $person['member_details'] !== [] ? $person['member_details'] : null,
+            ], fn ($v) => $v !== null && $v !== '')];
         }
+        unset($person);
 
         if ($donation > 0) {
-            $items[] = ['product' => $require('donation'), 'amount' => $donation, 'meta' => ['registration' => $registration->uid]];
+            $product = EventProducts::donationOffered($event);
+            if (! $product) {
+                throw new \DomainException('This event takes no donations.');
+            }
+            $items[] = ['product' => (int) $product->id, 'amount' => $donation, 'meta' => ['registration' => $registration->uid]];
         }
 
         return $items;

@@ -53,8 +53,6 @@ class EventSeeder extends BaseSeeder
                         'record' => [
                             ['form' => 'event-details', 'mode' => 'view'],
                             ['html' => '/events/manage/{uid}/links'],
-                            // Banners per device (shown on the event pages).
-                            ['form' => 'event-banners', 'mode' => 'edit', 'title' => 'Banners'],
                         ],
                         'dt-options' => [
                             'columns' => [
@@ -90,5 +88,7 @@ class EventSeeder extends BaseSeeder
 
         // The module's form schemas (rebuilt on every seed).
         EventForms::syncAll();
+        // The Attendees list (generic table).
+        \Iquesters\Event\Support\EventTables::ensureAttendees();
     }
 }

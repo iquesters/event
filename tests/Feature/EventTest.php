@@ -2,6 +2,8 @@
 
 namespace Iquesters\Event\Tests\Feature;
 
+use Illuminate\Http\UploadedFile;
+use Illuminate\Support\Facades\Storage;
 use Iquesters\Event\Database\Seeders\EventSeeder;
 use Iquesters\Event\Models\Event;
 use Iquesters\Event\Models\EventRegistration;
@@ -35,6 +37,54 @@ class EventTest extends TestCase
         $this->assertSame(Event::STATUS_PUBLISHED, $event->status);
         // The Manage events table's rows (data_url).
         $this->getJson('/events/manage/data')->assertOk()->assertJsonPath('response_schema.data.0.title', 'Annual Reunion 2026');
+    }
+
+    public function test_in_person_needs_a_venue_and_online_a_link(): void
+    {
+        $organisation = $this->makeOrganisation();
+        $this->actingAs($this->memberOf($organisation, 'admin'));
+        $base = ['organisation_id' => $organisation->id, 'title' => 'Talk', 'starts_at' => now()->addMonth()->format('Y-m-d\TH:i'), 'visibility' => 'members', 'status' => 'draft'];
+
+        $this->postJson('/events/manage', $base + ['location_type' => 'in_person'])->assertStatus(422)->assertJsonValidationErrors('venue');
+        $this->postJson('/events/manage', $base + ['location_type' => 'online'])->assertStatus(422)->assertJsonValidationErrors('online_url');
+
+        // Online: the venue and address typed earlier are dropped.
+        $this->postJson('/events/manage', $base + ['location_type' => 'online', 'online_url' => 'https://meet.example.com/x', 'venue' => 'Hall', 'address' => 'Somewhere'])->assertCreated();
+        $event = Event::query()->latest('id')->firstOrFail();
+        $this->assertSame(['online', null, null, 'https://meet.example.com/x'], [$event->location_type, $event->venue, $event->address, $event->online_url]);
+        $this->assertTrue($event->isOnline());
+
+        // In person: the link is dropped.
+        $this->putJson('/events/manage/'.$event->uid, $base + ['location_type' => 'in_person', 'venue' => 'Hall', 'online_url' => 'https://meet.example.com/x'])->assertOk();
+        $this->assertSame(['in_person', 'Hall', null], [$event->fresh()->location_type, $event->fresh()->venue, $event->fresh()->online_url]);
+    }
+
+    public function test_the_page_look_cover_and_colour(): void
+    {
+        Storage::fake('public');
+        $organisation = $this->makeOrganisation();
+        $this->actingAs($this->memberOf($organisation, 'admin'));
+        $base = ['organisation_id' => $organisation->id, 'title' => 'Gala', 'starts_at' => now()->addMonth()->format('Y-m-d\TH:i'), 'visibility' => 'public', 'status' => 'published', 'venue' => 'Hall'];
+
+        // A cover image is sent as multipart (the form engine does this when a file is chosen).
+        $this->post('/events/manage', $base + ['theme' => '#E11D48', 'maps_url' => 'https://www.google.com/maps/place/Hall/@22.57,88.36,17z', 'cover_image' => UploadedFile::fake()->image('cover.jpg', 800, 800)], ['Accept' => 'application/json'])->assertCreated();
+        $event = Event::query()->latest('id')->firstOrFail();
+        // Any colour (kept as #rrggbb).
+        $this->assertSame('#e11d48', $event->theme);
+        Storage::disk('public')->assertExists($event->cover_image);
+        $this->get('/e/'.$event->uid)->assertOk()->assertSee($event->coverUrl(), false)->assertSee('--theme-from: #e11d48', false)
+            // The Google Maps link: the map there, and "Open in Maps".
+            ->assertSee('https://maps.google.com/maps?q=22.57%2C88.36&amp;z=15&amp;output=embed', false)->assertSee('Open in Maps');
+
+        // Remove it: the drawn cover again.
+        $old = $event->cover_image;
+        $this->putJson('/events/manage/'.$event->uid, $base + ['remove_cover' => true])->assertOk();
+        $this->assertNull($event->fresh()->cover_image);
+        Storage::disk('public')->assertMissing($old);
+        $this->putJson('/events/manage/'.$event->uid, $base + ['theme' => 'neon'])->assertStatus(422)->assertJsonValidationErrors('theme');
+        // Online: the map link is dropped.
+        $this->putJson('/events/manage/'.$event->uid, array_merge($base, ['location_type' => 'online', 'online_url' => 'https://meet.example.com/x', 'maps_url' => 'https://maps.app.goo.gl/x']))->assertOk();
+        $this->assertNull($event->fresh()->maps_url);
     }
 
     public function test_admins_manage_only_their_organisations_events(): void
@@ -84,6 +134,7 @@ class EventTest extends TestCase
         $event = $this->makeEvent($organisation);
 
         $this->actingAs($this->makeUser('user'))->get("/events/{$event->uid}")->assertNotFound();
+        $this->get('/e/'.$event->uid)->assertNotFound();
         $this->get('/e/'.$event->slug)->assertNotFound();
     }
 
@@ -111,7 +162,19 @@ class EventTest extends TestCase
         $organisation = $this->makeOrganisation();
         $event = $this->makeEvent($organisation, ['visibility' => Event::VISIBILITY_PUBLIC, 'description' => 'Open to all']);
 
-        $this->get('/e/'.$event->slug)->assertOk()->assertSee('Annual Reunion')->assertSee('Open to all');
+        // The page lives at its uid; an old address by name redirects there.
+        $this->get('/e/'.$event->uid)->assertOk()->assertSee('Annual Reunion')->assertSee('Open to all')
+            ->assertSee('Hosted by')->assertSee('Register')
+            // No cover image: one is drawn in the theme's colours.
+            ->assertSee('linear-gradient(135deg, #4f46e5, #7b1dd0)', false)
+            // No Google Maps link given: no map, no "Open in Maps".
+            ->assertDontSee('Open in Maps')->assertDontSee('output=embed', false);
+        $this->get('/e/'.$event->slug)->assertRedirect('/e/'.$event->uid)->assertStatus(301);
+
+        // "Register" leads to the form after signing in or up (?register=1 survives the sign-in)…
+        $this->get('/e/'.$event->uid)->assertSee(route('events.show', ['uid' => $event->uid, 'register' => 1]), false);
+        // …and the visitor's organisation is remembered (e.g. the membership page then has it chosen).
+        $this->assertSame($organisation->uid, session(\Iquesters\Organisation\Support\OrganisationContext::CAME_FROM_KEY));
 
         $outsider = $this->makeUser('user');
         $this->actingAs($outsider)->postJson("/events/{$event->uid}/register")->assertOk();
@@ -125,7 +188,9 @@ class EventTest extends TestCase
         app(EventRegistrar::class)->register($member, $event, 1, 'Veg');
 
         $this->actingAs($this->memberOf($organisation, 'admin'));
-        $this->get("/events/manage/{$event->uid}/attendees")->assertOk()->assertSee($member->name)->assertSeeInOrder(['People', '2']);
+        $this->get("/events/manage/{$event->uid}/attendees")->assertOk()->assertSeeInOrder(['People', '2']);
+        // The names: the Attendees table's rows.
+        $this->getJson("/events/manage/{$event->uid}/attendees/data")->assertOk()->assertJsonPath('response_schema.data.0.name', $member->name);
 
         $csv = $this->get("/events/manage/{$event->uid}/attendees.csv")->assertOk()->streamedContent();
         $this->assertStringContainsString($member->email, $csv);

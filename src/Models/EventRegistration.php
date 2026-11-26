@@ -36,6 +36,16 @@ class EventRegistration extends Model
 
     public const MEALS = ['veg' => 'Veg', 'non_veg' => 'Non-veg'];
 
+    /** Country codes for mobile numbers (the first is the default). */
+    public const PHONE_CODES = [
+        '+91' => 'India (+91)', '+1' => 'USA / Canada (+1)', '+44' => 'UK (+44)', '+971' => 'UAE (+971)',
+        '+966' => 'Saudi Arabia (+966)', '+974' => 'Qatar (+974)', '+968' => 'Oman (+968)', '+965' => 'Kuwait (+965)',
+        '+973' => 'Bahrain (+973)', '+61' => 'Australia (+61)', '+64' => 'New Zealand (+64)', '+65' => 'Singapore (+65)',
+        '+60' => 'Malaysia (+60)', '+880' => 'Bangladesh (+880)', '+977' => 'Nepal (+977)', '+94' => 'Sri Lanka (+94)',
+        '+49' => 'Germany (+49)', '+33' => 'France (+33)', '+353' => 'Ireland (+353)', '+31' => 'Netherlands (+31)',
+        '+41' => 'Switzerland (+41)', '+46' => 'Sweden (+46)', '+81' => 'Japan (+81)', '+27' => 'South Africa (+27)',
+    ];
+
     /** Most guests one person may bring. */
     public const MAX_GUESTS = 10;
 

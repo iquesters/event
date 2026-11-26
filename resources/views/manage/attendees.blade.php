@@ -6,12 +6,6 @@
 @php
     $R = \Iquesters\Event\Models\EventRegistration::class;
     $money = fn ($v) => '₹'.number_format((float) $v, 2);
-    $badge = fn ($status) => match ($status) {
-        $R::STATUS_REGISTERED => 'text-bg-success',
-        $R::STATUS_UNDER_REVIEW => 'text-bg-info',
-        $R::STATUS_AWAITING_PAYMENT => 'text-bg-warning',
-        default => 'text-bg-secondary',
-    };
 @endphp
 
 @section('content')
@@ -44,53 +38,22 @@
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <h6 class="fs-6 mb-1">Add attendee</h6>
-                    <p class="small text-muted mb-3">For crew and invited guests tick "free". Otherwise an order is made: record the cash in Payments → Record a payment (its reference is shown after adding), or send them the pay link from their registration.</p>
-                    @include('userinterface::components.form', ['id' => $addFormId, 'entity_uid' => $event->uid, 'formData' => json_encode(['alumnus' => false, 'guests' => []])])
+                    <p class="small text-muted mb-3">For crew and invited guests pick their admin-only ticket (e.g. Crew ₹0). Otherwise an order is made: record the cash in Payments → Record a payment (its reference is shown after adding), or send them the pay link from their registration.</p>
+                    @include('userinterface::components.form', ['id' => $addFormId, 'entity_uid' => $event->uid, 'formData' => json_encode(['guests' => []])])
                 </div>
             </div>
         </div>
     @endif
 
-    <div class="card border-0 shadow-sm">
-        @if ($registrations->isEmpty())
-            <div class="card-body text-muted small">Nobody has registered yet.</div>
-        @else
-            <div class="table-responsive">
-                <table class="table table-sm align-middle mb-0 small">
-                    <thead class="table-light">
-                        <tr>
-                            <th>Name</th>
-                            @if ($event->is_paid)<th>Order</th>@endif
-                            <th class="text-end">People</th>
-                            @if ($event->is_paid)<th class="d-none d-md-table-cell">Meals</th><th class="text-end d-none d-md-table-cell">Total</th>@endif
-                            <th>Status</th>
-                            <th class="d-none d-md-table-cell">When</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        @foreach ($registrations as $registration)
-                            <tr @if (! $registration->isActive()) class="text-muted" @endif>
-                                <td>
-                                    {{ $registration->displayName() ?? '—' }}
-                                    <div class="text-muted d-none d-md-block">{{ $registration->email ?: $registration->user?->email }}@if ($registration->phone) · {{ $registration->phone }}@endif</div>
-                                    @if ($registration->source === 'admin')<span class="badge text-bg-light">added by admin</span>@endif
-                                </td>
-                                @if ($event->is_paid)<td class="font-monospace">{{ $registration->order?->reference }}</td>@endif
-                                <td class="text-end">{{ 1 + $registration->guests }}@if ($registration->children) <span class="text-muted">({{ $registration->children }} child)</span>@endif</td>
-                                @if ($event->is_paid)
-                                    <td class="d-none d-md-table-cell">{{ $registration->veg }} veg · {{ $registration->non_veg }} non-veg</td>
-                                    <td class="text-end d-none d-md-table-cell">{{ $registration->order ? $money($registration->order->total) : '' }}</td>
-                                @endif
-                                <td><span class="badge {{ $badge($registration->status) }}">{{ $registration->statusLabel() }}</span></td>
-                                <td class="d-none d-md-table-cell text-nowrap">{{ $registration->created_at?->format('j M, g:i A') }}</td>
-                                <td class="text-end"><a href="{{ route('events.manage.registrations.show', $registration->uid) }}" class="text-decoration-none">Open</a></td>
-                            </tr>
-                        @endforeach
-                    </tbody>
-                </table>
-            </div>
-        @endif
-    </div>
+    {{-- The list: the generic table "event-attendees" with this event's rows. Each row is a card
+         (record component event.attendee) with a coloured status badge; the side panel shows the
+         registration and, while it can be, the Cancel form (form schema event-registration-admin-cancel). --}}
+    @if ($table)
+        <div class="d-flex flex-column" style="height: 70vh; min-height: 420px;">
+            @include('userinterface::components.table', ['table_schema' => $table, 'dataUrl' => $dataUrl, 'create' => null])
+        </div>
+    @else
+        <div class="alert alert-warning small mb-0">The list needs the user-interface module.</div>
+    @endif
 </div>
 @endsection

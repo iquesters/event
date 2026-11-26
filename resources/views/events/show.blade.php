@@ -21,7 +21,7 @@
 
         {{-- Registration --}}
         <div class="col-12 col-lg-4">
-            <div class="card border-0 shadow-sm">
+            <div class="card border-0 shadow-sm" id="registration">
                 <div class="card-body d-grid gap-2">
                     <h6 class="fs-6 mb-0">Registration</h6>
                     @if ($event->capacity !== null)
@@ -31,9 +31,15 @@
                     @if ($event->is_paid)
                         {{-- What it costs --}}
                         <ul class="list-unstyled small mb-0">
-                            @if ($prices['bundle'] !== null)<li class="d-flex justify-content-between"><span>Alumnus (pass with membership)</span><span class="fw-semibold">{{ $money($prices['bundle']) }}</span></li>@endif
-                            @if ($prices['pass'] !== null)<li class="d-flex justify-content-between"><span>Guest over {{ $event->paid('free_child_age') }}</span><span class="fw-semibold">{{ $money($prices['pass']) }}</span></li>@endif
-                            <li class="d-flex justify-content-between"><span>Child {{ $event->paid('free_child_age') }} or under</span><span class="fw-semibold">Free</span></li>
+                            {{-- The tickets people pick (made on the event, priced in commerce). --}}
+                            @foreach ($prices as $ticket)
+                                <li class="py-1">
+                                    <div class="d-flex justify-content-between gap-2"><span>{{ $ticket['name'] }}</span><span class="fw-semibold text-nowrap">{{ $ticket['price'] > 0 ? $money($ticket['price']) : 'Free' }}</span></div>
+                                    @if ($ticket['left'] !== null)<div class="fw-semibold {{ $ticket['left'] === 0 ? 'text-danger' : 'text-muted' }}">{{ $ticket['left'] === 0 ? 'Sold out' : $ticket['left'].' left' }}</div>@endif
+                                    @if ($ticket['includes'])<div class="text-muted">Includes {{ $ticket['includes'] }}</div>@endif
+                                    @include('event::partials.ticket-membership', ['ticket' => $ticket, 'event' => $event, 'money' => $money])
+                                </li>
+                            @endforeach
                         </ul>
                     @endif
 
@@ -65,7 +71,7 @@
                     @elseif (! $mayRegister)
                         <div class="text-muted small">Only members of {{ $event->organisation?->name }} can register.</div>
                     @elseif ($event->is_paid)
-                        <a href="#register" class="btn btn-sm btn-primary">Register below</a>
+                        <div class="small text-muted">Register with the form below.</div>
                     @else
                         {{-- Form schema event-registration (guests, note). --}}
                         @include('userinterface::components.form', ['id' => \Iquesters\Event\Support\EventForms::REGISTRATION, 'entity_uid' => $event->uid, 'formData' => json_encode(['guests' => 0])])
@@ -106,4 +112,76 @@
         </div>
     @endif
 </div>
+@if ($paidOpen)
+    {{-- The total, above the terms: worked out by the server (the same ticket rules as the order) as the form is filled in. --}}
+    <script>
+        // The form draws itself after the page loads: start once its Total section is there.
+        window.addEventListener('load', () => {
+            const card = document.getElementById('register');
+            if (!card) return;
+            const ready = () => card.querySelector('[data-section-id="summary"] .lab-form-section-body');
+            if (ready()) return startTotal(card);
+            const watch = new MutationObserver(() => { if (ready()) { watch.disconnect(); startTotal(card); } });
+            watch.observe(card, { childList: true, subtree: true });
+        });
+        function startTotal(card) {
+            const form = card.querySelector('form');
+            const section = card.querySelector('[data-section-id="summary"] .lab-form-section-body');
+            if (!form || !section || section.querySelector('.lab-order-summary')) return;
+            const money = (v) => '₹' + Number(v).toLocaleString('en-IN', { maximumFractionDigits: 2 });
+            const box = document.createElement('div');
+            box.className = 'col-12';
+            box.innerHTML = '<div class="lab-order-summary p-3"><div class="d-grid gap-1 small" data-lines></div>'
+                + '<div class="d-flex justify-content-between align-items-baseline border-top mt-2 pt-2"><span class="fw-semibold">Total</span><span class="lab-order-total" data-total>…</span></div></div>';
+            section.appendChild(box);
+            const linesEl = box.querySelector('[data-lines]');
+            const totalEl = box.querySelector('[data-total]');
+            const row = (left, right, muted) => {
+                const div = document.createElement('div');
+                div.className = 'd-flex justify-content-between gap-2' + (muted ? ' text-muted' : '');
+                const a = document.createElement('span'); a.textContent = left;
+                const b = document.createElement('span'); b.className = 'text-nowrap'; b.textContent = right;
+                div.append(a, b);
+                return div;
+            };
+            let timer = null, seq = 0;
+            const refresh = async () => {
+                const mine = ++seq;
+                const payload = typeof serializeDynamicFormPayload === 'function' && form.__formMeta
+                    ? serializeDynamicFormPayload(form, form.__formMeta)
+                    : Object.fromEntries(new FormData(form));
+                try {
+                    const res = await fetch(@json(route('events.pay-quote', $event->uid)), {
+                        method: 'POST', credentials: 'same-origin',
+                        headers: { 'Content-Type': 'application/json', 'Accept': 'application/json', 'X-Requested-With': 'XMLHttpRequest', 'X-CSRF-TOKEN': document.querySelector('meta[name="csrf-token"]')?.content || '' },
+                        body: JSON.stringify(payload instanceof FormData ? Object.fromEntries(payload) : payload),
+                    });
+                    const json = await res.json();
+                    if (mine !== seq || !json?.data) return;
+                    const q = json.data;
+                    linesEl.replaceChildren(...q.lines.map(l => row(l.who + (l.ticket ? ' · ' + l.ticket : ''), l.price === null ? 'Choose a ticket' : (l.price > 0 ? money(l.price) : 'Free'), l.price === null)));
+                    if (q.donation > 0) linesEl.appendChild(row('Donation', money(q.donation)));
+                    totalEl.textContent = money(q.total);
+                } catch (e) { /* the total stays as it was */ }
+            };
+            const later = () => { clearTimeout(timer); timer = setTimeout(refresh, 350); };
+            form.addEventListener('input', later);
+            form.addEventListener('change', later);
+            form.addEventListener('click', (e) => { if (e.target.closest('button')) later(); });
+            setTimeout(refresh, 300);
+        }
+    </script>
+@endif
+{{-- Arrived from the public page's "Get tickets" (?register=1), after signing in or up: straight to the form. --}}
+@if (request()->boolean('register'))
+    <script>
+        window.addEventListener('load', () => {
+            const target = document.getElementById('register') || document.getElementById('registration');
+            if (target) {
+                target.scrollIntoView({ behavior: 'smooth', block: 'start' });
+                setTimeout(() => target.querySelector('input:not([type=hidden]), select, textarea')?.focus({ preventScroll: true }), 600);
+            }
+        });
+    </script>
+@endif
 @endsection

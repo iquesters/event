@@ -2,160 +2,302 @@
 
 namespace Iquesters\Event\Support;
 
-use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
 use Iquesters\Commerce\Models\Product;
 use Iquesters\Event\Models\Event;
 
 /**
- * The commerce products of a paid event, made from its settings and linked to
- * it (ref_type event): the pass, the free child pass, the private crew / invited
- * guest pass, the membership for the period set on the event, the bundle "pass
- * with membership", and the donation. Saving the event updates them (orders
- * already made keep their prices). Admins can change them further in commerce;
- * the next save of the event sets the event's prices again.
+ * A paid event's tickets and what people can buy with them.
  *
- * The membership product is the organisation's for that period: a second paid
- * event in the same period reuses it.
+ * - The event's own tickets, set in the event form (name, price, how many,
+ *   admins only), are kept as commerce "ticket" products linked to the event
+ *   (ref_type event). Admin-only tickets (crew, invited guests) are private.
+ *   On sale until registration closes; a ticket removed from the event goes
+ *   off sale (orders keep it).
+ * - Combinations are made in commerce, not here: a bundle that contains one of
+ *   the event's tickets (e.g. "Pass with membership" = the event's Pass
+ *   + Membership 2027) is offered at registration next to the tickets.
+ * - A donation is offered when the organisation has a donation product.
+ *
+ * paid_settings: tickets [{product_id, name, price, limit, includes, admin_only}].
  */
 class EventProducts
 {
     public const REF_TYPE = 'event';
 
-    public const MEMBERSHIP_REF_TYPE = 'organisation_membership';
+    /** Who a ticket is for. */
+    public const FOR = ['everyone', 'adults', 'children'];
 
-    /** Make or update the products; their ids go into paid_settings.products. */
-    public static function sync(Event $event, ?int $by = null): void
+    /**
+     * Make or update the event's ticket products from the form's rows.
+     *
+     * @param  array<int, array{product_id?: mixed, name: string, price: mixed, limit?: mixed, admin_only?: mixed}>  $rows
+     * @return array<int, array> the tickets as stored in paid_settings
+     */
+    public static function sync(Event $event, array $rows, ?int $by = null): array
     {
-        if (! $event->is_paid) {
-            self::stopSelling($event);
+        return DB::transaction(function () use ($event, $rows, $by) {
+            $previous = collect((array) (((array) $event->paid_settings)['tickets'] ?? []))->keyBy('product_id');
+            $common = [
+                'organisation_id' => $event->organisation_id, 'currency' => 'INR', 'kind' => Product::KIND_VIRTUAL, 'type' => 'ticket',
+                'status' => Product::STATUS_ACTIVE, 'updated_by' => $by ?? 0,
+                'sale_until' => $event->registration_closes_at ?? $event->starts_at,
+                'validity' => Product::VALIDITY_FIXED,
+                'valid_from' => $event->starts_at->toDateString(),
+                'valid_until' => ($event->ends_at ?? $event->starts_at)->toDateString(),
+            ];
 
-            return;
-        }
+            $tickets = [];
+            foreach (array_values($rows) as $sort => $row) {
+                $name = trim((string) $row['name']);
+                $price = round((float) $row['price'], 2);
+                $limit = ($row['limit'] ?? null) === null || $row['limit'] === '' ? null : max(0, (int) $row['limit']);
+                $adminOnly = filter_var($row['admin_only'] ?? false, FILTER_VALIDATE_BOOLEAN);
+                // Who it's for: everyone, adults, or children up to the event's child age.
+                $for = in_array($row['for'] ?? null, self::FOR, true) ? $row['for'] : 'everyone';
+                // What comes with it (e.g. Lunch, T-shirt): shown to people, kept as the product's description.
+                $includes = trim((string) ($row['includes'] ?? '')) ?: null;
+                $old = ! empty($row['product_id']) ? $previous->get((int) $row['product_id']) : null;
 
-        DB::transaction(function () use ($event, $by) {
-            $title = $event->title;
-            $age = (int) $event->paid('free_child_age');
-            $saleUntil = $event->registration_closes_at ?? $event->starts_at;
-            $eventDates = ['validity' => Product::VALIDITY_FIXED, 'valid_from' => $event->starts_at->toDateString(), 'valid_until' => ($event->ends_at ?? $event->starts_at)->toDateString()];
-            $common = ['organisation_id' => $event->organisation_id, 'currency' => 'INR', 'kind' => Product::KIND_VIRTUAL, 'status' => Product::STATUS_ACTIVE, 'updated_by' => $by ?? 0];
-            $ids = (array) (((array) $event->paid_settings)['products'] ?? []);
-
-            $passPrice = (float) $event->paid('pass_price');
-            $ids['pass'] = self::upsert($event, $ids['pass'] ?? null, $common + $eventDates + [
-                'name' => "{$title}: Pass", 'type' => 'ticket', 'price' => $passPrice, 'visibility' => Product::VISIBILITY_PUBLIC,
-                'sale_until' => $saleUntil, 'description' => 'Entry and meal for one person over '.$age.'.',
-            ], $by);
-            $ids['child'] = self::upsert($event, $ids['child'] ?? null, $common + $eventDates + [
-                'name' => "{$title}: Child {$age} or under", 'type' => 'ticket', 'price' => 0, 'visibility' => Product::VISIBILITY_PUBLIC,
-                'sale_until' => $saleUntil, 'description' => "Free for children up to and including {$age}.",
-            ], $by);
-            $ids['crew'] = self::upsert($event, $ids['crew'] ?? null, $common + $eventDates + [
-                'name' => "{$title}: Crew / invited guest", 'type' => 'ticket', 'price' => 0, 'visibility' => Product::VISIBILITY_PRIVATE,
-                'sale_until' => null, 'description' => 'Added by admins only.',
-            ], $by);
-
-            // Membership for the period, with the alumnus bundle.
-            $from = $event->paid('membership_from');
-            $until = $event->paid('membership_until');
-            if ($from && $until) {
-                $ids['membership'] = self::membership($event, $from, $until, (float) $event->paid('membership_price'), $common, $by);
-                $bundlePrice = (float) $event->paid('bundle_price');
-                $passInBundle = min($passPrice, $bundlePrice);
-                $ids['bundle'] = self::upsert($event, $ids['bundle'] ?? null, $common + [
-                    'name' => "{$title}: Pass with membership", 'type' => 'bundle', 'price' => $bundlePrice, 'visibility' => Product::VISIBILITY_PUBLIC,
-                    'validity' => Product::VALIDITY_NONE, 'sale_until' => $saleUntil,
-                    'description' => 'For alumni: the pass and the membership till '.Carbon::parse($until)->format('j M Y').'.',
+                $productId = self::upsert($event, $old['product_id'] ?? null, $common + [
+                    'name' => "{$event->title}: {$name}",
+                    'price' => $price,
+                    'visibility' => $adminOnly ? Product::VISIBILITY_PRIVATE : Product::VISIBILITY_PUBLIC,
+                    'track_stock' => $limit !== null,
+                    'stock_quantity' => $limit,
+                    'description' => $includes ? "Includes: {$includes}" : null,
                 ], $by);
-                $bundle = Product::query()->find($ids['bundle']);
-                $bundle->bundleItems()->delete();
-                $bundle->bundleItems()->create(['product_id' => $ids['pass'], 'quantity' => 1, 'price_in_bundle' => $passInBundle, 'sort' => 0]);
-                $bundle->bundleItems()->create(['product_id' => $ids['membership'], 'quantity' => 1, 'price_in_bundle' => round($bundlePrice - $passInBundle, 2), 'sort' => 1]);
-            } else {
-                foreach (['bundle'] as $role) {
-                    if (! empty($ids[$role])) {
-                        Product::query()->whereKey($ids[$role])->update(['status' => Product::STATUS_INACTIVE]);
-                    }
-                }
-                unset($ids['membership'], $ids['bundle']);
+
+                $tickets[] = ['product_id' => $productId, 'name' => $name, 'price' => $price, 'limit' => $limit, 'includes' => $includes, 'for' => $for, 'admin_only' => $adminOnly, 'sort' => $sort];
             }
 
-            if ($event->paid('donation')) {
-                $ids['donation'] = self::upsert($event, $ids['donation'] ?? null, $common + [
-                    'name' => "{$title}: Donation", 'type' => 'donation', 'price' => 0, 'visibility' => Product::VISIBILITY_PUBLIC,
-                    'validity' => Product::VALIDITY_NONE, 'custom_amount' => true, 'min_amount' => 1, 'sale_until' => $saleUntil,
-                ], $by, keep: ['min_amount', 'max_amount']);
-            } elseif (! empty($ids['donation'])) {
-                Product::query()->whereKey($ids['donation'])->update(['status' => Product::STATUS_INACTIVE]);
-                unset($ids['donation']);
+            // Tickets taken off the event: off sale.
+            $gone = $previous->keys()->map(fn ($id) => (int) $id)->diff(array_column($tickets, 'product_id'))->all();
+            if ($gone) {
+                Product::query()->whereIn('id', $gone)->where('ref_type', self::REF_TYPE)->where('ref_id', $event->id)->update(['status' => Product::STATUS_INACTIVE]);
             }
 
-            $settings = (array) $event->paid_settings;
-            $settings['products'] = $ids;
-            $event->forceFill(['paid_settings' => $settings])->saveQuietly();
+            return $tickets;
         });
     }
 
-    /** No longer paid: its products are off sale (orders keep them). */
+    /** All the event's tickets off sale (it isn't paid any more). */
     public static function stopSelling(Event $event): void
     {
-        $ids = array_values((array) (((array) $event->paid_settings)['products'] ?? []));
-        $membership = $event->productId('membership');
-        $ids = array_filter($ids, fn ($id) => (int) $id !== $membership); // the organisation's, not the event's
+        $ids = collect((array) (((array) $event->paid_settings)['tickets'] ?? []))->pluck('product_id')->filter()->all();
         if ($ids) {
-            Product::query()->whereIn('id', $ids)->update(['status' => Product::STATUS_INACTIVE]);
+            Product::query()->whereIn('id', $ids)->where('ref_type', self::REF_TYPE)->where('ref_id', $event->id)->update(['status' => Product::STATUS_INACTIVE]);
         }
     }
 
-    /** The products the event sells, by role. @return array<string, Product> */
-    public static function products(Event $event): array
+    /**
+     * What a person can pick: the event's tickets (admin-only ones for admins),
+     * then the commerce bundles that contain one of them (public, on sale).
+     *
+     * @return array<int, array{product: Product, name: string, admin_only: bool, membership_product_id: ?int, bundle: bool}>
+     */
+    public static function tickets(Event $event, bool $withAdminOnly = false): array
     {
-        $ids = array_filter((array) (((array) $event->paid_settings)['products'] ?? []));
-        $products = Product::query()->whereIn('id', $ids)->get()->keyBy('id');
+        $rows = collect((array) (((array) $event->paid_settings)['tickets'] ?? []));
+        $ids = $rows->pluck('product_id')->filter()->map(fn ($id) => (int) $id)->all();
+        if ($ids === []) {
+            return [];
+        }
+        $products = Product::query()->where('organisation_id', $event->organisation_id)->whereIn('id', $ids)->get()->keyBy('id');
 
-        return collect($ids)->map(fn ($id) => $products->get((int) $id))->filter()->all();
+        $tickets = $rows
+            ->map(fn ($t) => ['product' => $products->get((int) ($t['product_id'] ?? 0)), 'name' => $t['name'], 'includes' => $t['includes'] ?? null, 'for' => $t['for'] ?? 'everyone', 'admin_only' => (bool) ($t['admin_only'] ?? false), 'membership_product_id' => null, 'bundle' => false])
+            ->filter(fn ($t) => $t['product'] && $t['product']->isActive() && ($withAdminOnly || ! $t['admin_only']))
+            ->values();
+
+        // Combinations made in commerce: bundles with one of these tickets inside.
+        $bundles = Product::query()
+            ->where('organisation_id', $event->organisation_id)
+            ->where('type', 'bundle')
+            ->where('status', Product::STATUS_ACTIVE)
+            ->where('visibility', Product::VISIBILITY_PUBLIC)
+            ->whereHas('bundleItems', fn ($q) => $q->whereIn('product_id', $ids))
+            ->with('bundleItems.product')
+            ->orderBy('name')
+            ->get()
+            ->filter(fn (Product $bundle) => $bundle->isOnSale())
+            ->map(fn (Product $bundle) => [
+                'product' => $bundle,
+                'name' => $bundle->name,
+                // Inside: the event's tickets it holds (who it's for follows them).
+                'ticket_ids' => $bundle->bundleItems->pluck('product_id')->map(fn ($id) => (int) $id)->intersect($ids)->values()->all(),
+                'for' => 'adults',
+                // What's inside the bundle, e.g. "Guest pass + Membership 2027".
+                'includes' => $bundle->bundleItems->pluck('product')->filter()->pluck('name')->implode(' + '),
+                'admin_only' => false,
+                // A membership inside: the person's own (their email), and not twice.
+                'membership_product_id' => $bundle->bundleItems->pluck('product')->filter()->firstWhere('type', 'membership')?->id,
+                'bundle' => true,
+            ]);
+
+        return $tickets->concat($bundles)->values()->all();
     }
 
     /**
-     * @param  string[]  $keep  fields an admin may have changed in commerce that the event doesn't set again
+     * The tickets a person may have, by age: the event's tickets for them
+     * (everyone, or adults / children), without bundles.
+     *
+     * @return array<int, array> entries of tickets()
      */
-    private static function upsert(Event $event, ?int $id, array $values, ?int $by, array $keep = []): int
+    public static function ticketsFor(Event $event, string $ageGroup, bool $withAdminOnly = false): array
     {
-        $product = $id ? Product::query()->whereKey($id)->where('organisation_id', $event->organisation_id)->first() : null;
+        $group = $ageGroup === 'child' ? 'children' : 'adults';
+
+        return array_values(array_filter(self::tickets($event, $withAdminOnly), fn ($t) => ! $t['bundle'] && in_array($t['for'] ?? 'everyone', ['everyone', $group], true)));
+    }
+
+    /**
+     * The ticket a person gets:
+     * - the one they chose, when it's for them;
+     * - a member (adult): a bundle with one of their tickets and a membership,
+     *   unless they already have that membership ($hasMembership);
+     * - else their only ticket.
+     *
+     * @param  callable(int $membershipProductId): bool  $hasMembership
+     * @return array an entry of tickets()
+     *
+     * @throws \DomainException with a message for the person
+     */
+    public static function choose(Event $event, string $ageGroup, bool $member, ?int $chosenId, bool $admin, callable $hasMembership, string $who): array
+    {
+        $own = self::ticketsFor($event, $ageGroup, $admin);
+        $ownIds = array_map(fn ($t) => (int) $t['product']->id, $own);
+        $bundles = $ageGroup === 'child' ? [] : array_values(array_filter(self::tickets($event), fn ($t) => $t['bundle'] && array_intersect($t['ticket_ids'] ?? [], $ownIds) !== []));
+
+        if ($chosenId) {
+            foreach ([...$own, ...$bundles] as $t) {
+                if ((int) $t['product']->id === $chosenId) {
+                    return $t;
+                }
+            }
+            throw new \DomainException("{$who}: that ticket isn't for ".($ageGroup === 'child' ? 'a child' : 'an adult').'.');
+        }
+        if ($member && self::sellsMembership($event)) {
+            foreach ($bundles as $bundle) {
+                if ($bundle['membership_product_id'] && ! $hasMembership((int) $bundle['membership_product_id'])) {
+                    return $bundle;
+                }
+            }
+        }
+        if (count($own) === 1) {
+            return $own[0];
+        }
+        throw new \DomainException($own === []
+            ? "{$who}: this event has no ticket for ".($ageGroup === 'child' ? 'children' : 'adults').'.'
+            : "{$who}: choose a ticket.");
+    }
+
+    /**
+     * The donation a registration offers: the organisation's donation when
+     * the event asks for one, else the one it offers with every paid order
+     * (commerce setting), else none.
+     */
+    public static function donationOffered(Event $event): ?Product
+    {
+        return $event->paid('ask_donation')
+            ? self::donation($event)
+            : Product::donationForEveryOrder((int) $event->organisation_id);
+    }
+
+    /**
+     * Is registering also joining the organisation? The event says so
+     * ("Registration includes membership") and sells a membership: a bundle
+     * (made in commerce) with one of its tickets and a membership.
+     */
+    public static function sellsMembership(Event $event): bool
+    {
+        if (! $event->paid('with_membership')) {
+            return false;
+        }
+        foreach (self::tickets($event) as $t) {
+            if ($t['bundle'] && ! empty($t['membership_product_id'])) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /**
+     * What the person registering (an adult) gets, for the form to show:
+     * the bundle with the membership when registering includes it, else their
+     * only adult ticket. Null when they must choose.
+     */
+    public static function registrantTicket(Event $event): ?array
+    {
+        if (self::sellsMembership($event)) {
+            foreach (self::tickets($event) as $t) {
+                if ($t['bundle'] && ! empty($t['membership_product_id'])) {
+                    return $t;
+                }
+            }
+        }
+        $own = self::ticketsFor($event, 'adult');
+
+        return count($own) === 1 ? $own[0] : null;
+    }
+
+    /** The organisation's donation product (made in commerce), if it has one on sale. */
+    public static function donation(Event $event): ?Product
+    {
+        return Product::query()
+            ->where('organisation_id', $event->organisation_id)
+            ->where('type', 'donation')
+            ->where('status', Product::STATUS_ACTIVE)
+            ->where('visibility', Product::VISIBILITY_PUBLIC)
+            ->orderBy('id')
+            ->get()
+            ->first(fn (Product $p) => $p->isOnSale());
+    }
+
+    /**
+     * The organisation's donation product, made when it has none: "Donation",
+     * the giver chooses the amount (at least 1). It belongs to the
+     * organisation (not the event), so later events and checkouts reuse it;
+     * its rules are edited in commerce.
+     */
+    public static function ensureDonation(Event $event, ?int $by = null): Product
+    {
+        $existing = Product::query()->where('organisation_id', $event->organisation_id)->where('type', 'donation')
+            ->where('status', Product::STATUS_ACTIVE)->orderBy('id')->first();
+        if ($existing) {
+            return $existing;
+        }
+
+        return Product::create([
+            'organisation_id' => $event->organisation_id,
+            'name' => 'Donation',
+            'type' => 'donation',
+            'kind' => Product::KIND_VIRTUAL,
+            'visibility' => Product::VISIBILITY_PUBLIC,
+            'status' => Product::STATUS_ACTIVE,
+            'price' => 1,
+            'currency' => 'INR',
+            'custom_amount' => true,
+            'min_amount' => 1,
+            'validity' => Product::VALIDITY_NONE,
+            'description' => 'Any amount, given with a payment.',
+            'ref_type' => 'organisation',
+            'ref_id' => $event->organisation_id,
+            'created_by' => $by ?? 0,
+            'updated_by' => $by ?? 0,
+        ]);
+    }
+
+    private static function upsert(Event $event, $id, array $values, ?int $by): int
+    {
+        $product = $id ? Product::query()->whereKey((int) $id)->where('organisation_id', $event->organisation_id)->first() : null;
         if ($product) {
-            $product->update(array_diff_key($values, array_flip($keep)));
+            $product->update($values);
 
             return (int) $product->id;
         }
 
         return (int) Product::create($values + ['ref_type' => self::REF_TYPE, 'ref_id' => $event->id, 'created_by' => $by ?? 0])->id;
-    }
-
-    /** The organisation's membership product for the period (shared by its events). */
-    private static function membership(Event $event, string $from, string $until, float $price, array $common, ?int $by): int
-    {
-        $from = Carbon::parse($from)->toDateString();
-        $until = Carbon::parse($until)->toDateString();
-        $values = $common + [
-            'name' => ($event->organisation?->name ?? 'Membership').' membership '.Carbon::parse($from)->format('Y').(Carbon::parse($until)->format('Y') !== Carbon::parse($from)->format('Y') ? '–'.Carbon::parse($until)->format('y') : ''),
-            'type' => 'membership', 'price' => $price, 'visibility' => Product::VISIBILITY_PUBLIC,
-            'validity' => Product::VALIDITY_FIXED, 'valid_from' => $from, 'valid_until' => $until,
-            'description' => 'Membership from '.Carbon::parse($from)->format('j M Y').' to '.Carbon::parse($until)->format('j M Y').'.',
-        ];
-
-        $product = Product::query()
-            ->where('organisation_id', $event->organisation_id)
-            ->where('type', 'membership')
-            ->where('ref_type', self::MEMBERSHIP_REF_TYPE)
-            ->whereDate('valid_from', $from)
-            ->whereDate('valid_until', $until)
-            ->first();
-        if ($product) {
-            $product->update(['price' => $price, 'status' => Product::STATUS_ACTIVE, 'updated_by' => $by ?? 0]);
-
-            return (int) $product->id;
-        }
-
-        return (int) Product::create($values + ['ref_type' => self::MEMBERSHIP_REF_TYPE, 'ref_id' => $event->organisation_id, 'created_by' => $by ?? 0])->id;
     }
 }

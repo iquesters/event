@@ -36,7 +36,7 @@ class EventController extends Controller
         $past = $request->query('when') === 'past';
 
         $events = Event::query()
-            ->with('organisation:id,name')
+            ->with('organisation:id,uid,name')
             ->whereIn('organisation_id', $organisationIds)
             ->whereIn('status', [Event::STATUS_PUBLISHED, Event::STATUS_CANCELLED])
             ->when($past,
@@ -60,6 +60,10 @@ class EventController extends Controller
         $event = $this->find($request, $uid);
         $user = $request->user();
         $registration = $this->registrar->registrationOf($user, $event);
+        // The registration form follows what's on sale now (e.g. a bundle whose sale starts today).
+        if ($event->is_paid && ! $registration) {
+            EventForms::syncPaid($event);
+        }
 
         return view('event::events.show', [
             'event' => $event,
@@ -70,7 +74,11 @@ class EventController extends Controller
                 ? route('payment.pay', ['uid' => $registration->order->uid, 'return' => '/events/'.$event->uid])
                 : null,
             // Prefill: their account.
-            'paidFormData' => ['name' => $user->name ?? '', 'email' => $user->email ?? '', 'phone' => $user->phone ?? '', 'alumnus' => true, 'guests' => []],
+            // Prefill: their account, and their membership details (e.g. their school records) when the membership module knows them.
+            'paidFormData' => ['name' => $user->name ?? '', 'email' => $user->email ?? '', 'phone_code' => '+91', 'phone' => $user->phone ?? '', 'guests' => []]
+                + ($event->is_paid && app()->bound(\Iquesters\Event\Contracts\MembershipDetails::class)
+                    ? app(\Iquesters\Event\Contracts\MembershipDetails::class)->prefill($event, $user)
+                    : []),
             // Closed: new people can still become members (membership on its own).
             'membershipUrl' => Route::has('community.membership') ? route('community.membership', ['organisation' => $event->organisation?->uid]) : null,
             'closedReason' => $event->registrationClosedReason(),
@@ -110,7 +118,7 @@ class EventController extends Controller
             return $this->toPayment($event, $existing, "You're already registered.");
         }
 
-        $data = $request->validate(EventPaidRegistrar::rules($event), EventPaidRegistrar::messages());
+        $data = $request->validate(EventPaidRegistrar::rules($event), EventPaidRegistrar::messages($event));
 
         try {
             $registration = $this->paid->register($event, $data, $request->user());
@@ -121,6 +129,15 @@ class EventController extends Controller
         }
 
         return $this->toPayment($event, $registration, $registration->order?->isPaid() ? "You're registered." : 'Registered: now pay '.$registration->order?->reference.' to confirm.');
+    }
+
+    /** The total of the paid form as filled in so far (shown above the terms). */
+    public function payQuote(Request $request, string $uid): JsonResponse
+    {
+        $event = $this->find($request, $uid);
+        abort_unless($event->is_paid, 404);
+
+        return response()->json(['success' => true, 'data' => $this->paid->quote($event, $request->all(), $request->user())]);
     }
 
     public function cancel(Request $request, string $uid): JsonResponse
