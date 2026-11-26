@@ -5,6 +5,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- **Requires `iquesters/user-interface` ^2.2 and `iquesters/organisation` ^2.2**: the attendees page uses user-interface's table partial (`components.table`, new in 2.2) and the public page uses `OrganisationContext::rememberVisit()` (new in organisation 2.2); with ^2.1 older versions could be installed and those pages would fail.
+
+## [1.1.0] – 2026-11-27
+
+_Also covers 1.0.0, which was tagged without its own heading._
+
 ### Database
 - **One migration for this release** (`2026_11_30_000003_add_paid_registration_to_events`): events get `location_type`, `cover_image`, `theme`, `maps_url`, `is_paid`, `paid_settings`; registrations get the order, the registrant's details, head counts, meals, donation, people, source and terms. Each column is added only when missing, so it is safe on live data. The unused per-device banner and order-prefix columns are no longer made.
 
