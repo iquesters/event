@@ -1,6 +1,6 @@
 {
   "name": "iquesters/event",
-  "description": "Events for organisations: publish events, members register, admins see attendees. Built on the iquesters modules.",
+  "description": "Events for organisations: publish events, members register (free or paid, with guests and meals), admins see attendees. Built on the iquesters modules.",
   "keywords": [
     "laravel",
     "events",
@@ -25,9 +25,10 @@
   "require": {
     "php": "^8.3",
     "laravel/framework": "^12.0|^13.0",
-    "iquesters/foundation": "^2.0",
-    "iquesters/user-interface": "^2.0",
-    "iquesters/organisation": "^2.0",
+    "iquesters/foundation": "^2.1",
+    "iquesters/user-interface": "^2.1",
+    "iquesters/organisation": "^2.1",
+    "iquesters/commerce": "^2.0",
     "spatie/laravel-permission": "^8.0"
   },
   "require-dev": {
@@ -66,6 +67,16 @@
           "iquesters/organisation": "2.x-dev"
         }
       }
+    },
+    {
+      "type": "path",
+      "url": "../commerce",
+      "options": {
+        "symlink": true,
+        "versions": {
+          "iquesters/commerce": "2.99.0"
+        }
+      }
     }
   ],
   "scripts": {
@@ -93,5 +104,8 @@
         "Iquesters\\Event\\EventServiceProvider"
       ]
     }
+  },
+  "suggest": {
+    "iquesters/payment": "The pay page (UPI QR, proof, verification) for paid registrations"
   }
 }

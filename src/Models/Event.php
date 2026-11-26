@@ -8,6 +8,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
 use Illuminate\Database\Eloquent\Relations\HasMany;
 use Illuminate\Support\Carbon;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Iquesters\Organisation\Models\Organisation;
 
@@ -60,6 +61,12 @@ class Event extends Model
         'registration_closes_at',
         'feedback_enabled',
         'feedback_anonymous',
+        'is_paid',
+        'paid_settings',
+        'reference_prefix',
+        'banner_desktop',
+        'banner_tablet',
+        'banner_mobile',
         'created_by',
         'updated_by',
     ];
@@ -72,6 +79,24 @@ class Event extends Model
         'feedback_enabled' => 'boolean',
         'feedback_anonymous' => 'boolean',
         'capacity' => 'integer',
+        'is_paid' => 'boolean',
+        'paid_settings' => 'array',
+    ];
+
+    /** Banner sizes, smallest first (a missing one falls back to the next). */
+    public const BANNER_SIZES = ['mobile', 'tablet', 'desktop'];
+
+    /** Paid-registration defaults (paid_settings). */
+    public const PAID_DEFAULTS = [
+        'pass_price' => 0,
+        'bundle_price' => 0,
+        'membership_price' => 0,
+        'membership_from' => null,
+        'membership_until' => null,
+        'free_child_age' => 5,
+        'donation' => false,
+        // together: verifying the payment approves the memberships; separate: they go to Applications.
+        'approval' => 'together',
     ];
 
     protected static function booted(): void
@@ -135,10 +160,37 @@ class Event extends Model
         return $this->visibility === self::VISIBILITY_PUBLIC && $this->status !== self::STATUS_DRAFT;
     }
 
-    /** People coming: registrations plus their guests. */
+    /** People coming: registrations (confirmed or waiting for payment) plus their guests. */
     public function seatsTaken(): int
     {
-        return (int) $this->registrations()->where('status', EventRegistration::STATUS_REGISTERED)->sum(DB::raw('1 + guests'));
+        return (int) $this->registrations()->whereIn('status', EventRegistration::ACTIVE_STATUSES)->sum(DB::raw('1 + guests'));
+    }
+
+    /** A paid-registration setting (paid_settings), with its default. */
+    public function paid(string $key, mixed $default = null): mixed
+    {
+        return ((array) $this->paid_settings)[$key] ?? self::PAID_DEFAULTS[$key] ?? $default;
+    }
+
+    /** The commerce product id the event made for a role (pass, child, crew, membership, bundle, donation). */
+    public function productId(string $role): ?int
+    {
+        $id = ((array) $this->paid_settings)['products'][$role] ?? null;
+
+        return $id ? (int) $id : null;
+    }
+
+    /** @return array<string, string> size => URL of the banners set */
+    public function bannerUrls(): array
+    {
+        $urls = [];
+        foreach (self::BANNER_SIZES as $size) {
+            if ($path = $this->{'banner_'.$size}) {
+                $urls[$size] = Storage::disk('public')->url($path);
+            }
+        }
+
+        return $urls;
     }
 
     public function seatsLeft(): ?int

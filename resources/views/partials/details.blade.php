@@ -1,5 +1,6 @@
 {{-- An event's details (event page and public page). --}}
-<div class="card border-0 shadow-sm">
+<div class="card border-0 shadow-sm overflow-hidden">
+    @include('event::partials.banner', ['event' => $event])
     <div class="card-body">
         <div class="d-flex flex-wrap gap-1 mb-2">
             @if ($event->type)<span class="badge text-bg-light">{{ $event->type }}</span>@endif

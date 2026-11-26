@@ -5,6 +5,15 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added (step 3: paid registration; needs iquesters/commerce 2.x, and iquesters/payment for the pay page)
+- **Paid events** (event form → *Paid registration*): the pass price, the alumni price (pass with membership), the membership's own price and period, free children up to an age (5), the order reference prefix (e.g. `TTV-MEET`), an optional donation, and whether paying approves alumni's memberships (`together`) or sends them to Applications (`separate`).
+- **Saving a paid event makes its products in commerce** (`EventProducts`, linked to the event): *Pass*, *Child 5 or under* (₹0), *Crew / invited guest* (private, ₹0), the organisation's *membership* for the period (shared by its events in that period), *Pass with membership* (a bundle: the pass at its price, the membership for the rest), *Donation*. Sold until registration closes (the deadline, else the start); saving again updates them; orders keep their prices.
+- **The registration form** of a paid event (form schema `event-paid-registration-{uid}`): name, mobile, email, gender, meal, "I am an alumnus"; **guests** (name, gender, over 5 / 5 or under, meal, also an alumnus + their email and mobile); donation; the organisation's Terms and Privacy policy (required). **Continue to payment** makes one commerce order (`{prefix}-0001`) with a line per person: alumni the pass with membership (unless they already paid that membership: the pass), other guests the pass, children free; then the pay page (`/pay/{order}`, payment module) and back to the event.
+- **Registration statuses** follow the order: *Awaiting payment* → *Payment under review* → *Confirmed* (paid), back to awaiting payment when a payment is rejected, *Cancelled* with the order. Places count every registration that isn't cancelled. Cancelling an unpaid registration cancels its order.
+- **Attendees** (paid events): confirmed people, adults / children, veg / non-veg, the amount paid; each registration's people, order and pay link (`/events/manage/registrations/{uid}`), and Cancel for unpaid ones (form `event-registration-admin-cancel`). **Add attendee** (form `event-add-attendee-{uid}`): crew and invited guests free, or someone paying at the desk (record the cash in Payments). **CSV**: one row per person (reference, status, gender, age, meal, alumnus, contact).
+- **Banners per device** (form `event-banners` in the event's record): desktop, tablet, mobile; shown at the top of the event pages, the right one for the screen.
+- **After registration closes**, a paid event's pages offer *Become a member* (the membership page with the organisation chosen).
+
 ### Fixed
 - **The attendee feedback page uses the full content width** like every other page.
 

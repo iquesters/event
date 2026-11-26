@@ -16,8 +16,11 @@
         <div class="card-body d-flex flex-wrap justify-content-between align-items-center gap-2 small">
             @if ($closedReason)
                 <span class="text-muted">{{ $closedReason }}</span>
+                @if ($event->is_paid && \Illuminate\Support\Facades\Route::has('community.membership') && ! $event->isPast())
+                    <a href="{{ route('community.membership', ['organisation' => $event->organisation?->uid]) }}" class="btn btn-sm btn-outline-primary">Become a member</a>
+                @endif
             @else
-                <span>Want to come? Sign in to register.</span>
+                <span>Want to come? Sign in to register.@if ($event->is_paid) <span class="text-muted">Tickets are paid by UPI after registering.</span>@endif</span>
                 <a href="{{ route('events.show', $event->uid) }}" class="btn btn-sm btn-primary">Register</a>
             @endif
         </div>

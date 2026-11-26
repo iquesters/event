@@ -125,7 +125,7 @@ class EventTest extends TestCase
         app(EventRegistrar::class)->register($member, $event, 1, 'Veg');
 
         $this->actingAs($this->memberOf($organisation, 'admin'));
-        $this->get("/events/manage/{$event->uid}/attendees")->assertOk()->assertSee($member->name)->assertSee('2 people with guests');
+        $this->get("/events/manage/{$event->uid}/attendees")->assertOk()->assertSee($member->name)->assertSeeInOrder(['People', '2']);
 
         $csv = $this->get("/events/manage/{$event->uid}/attendees.csv")->assertOk()->streamedContent();
         $this->assertStringContainsString($member->email, $csv);

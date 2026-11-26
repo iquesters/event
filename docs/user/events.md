@@ -35,3 +35,20 @@ A public event has its own page at `/e/the-event-name`, which anyone can open, e
 
 **For attendees:** once the event has started, open the event and press **Give feedback** (or scan the poster). You can answer once.
 
+
+## Paid events (tickets, guests, meals)
+
+Needs the commerce and payment modules.
+
+**Set up** (Manage events → the event → Edit → *Paid registration*):
+
+1. Tick **Registration is paid**.
+2. **Pass**: the price per person over the free age (e.g. ₹600).
+3. **Pass with membership**: what an alumnus pays, the pass plus the membership (e.g. ₹600), with the **membership period** (e.g. 1 Jan – 31 Dec 2027) and the **membership's own price** (e.g. ₹300, used after the event or when bought alone).
+4. **Children free up to** (e.g. 5), the **order reference prefix** (e.g. TTV-MEET), **donation** on or off, and whether paying **approves the alumni's memberships** or sends them to Applications.
+5. Save. The products appear in **Commerce → Products** (pass, child, crew, membership, pass with membership, donation). Change prices there or here; orders already made keep their prices.
+6. Set **Payment settings** (your UPI ID) in the payment module, and optionally the event's **Banners** (desktop, tablet, mobile) in its record.
+
+**People register** on the event page: their details, gender and meal, then each guest (over the free age or not, meal, "also an alumnus" with their email). **Continue to payment** shows the total and the UPI QR. They pay, send the UTR and a screenshot, and the registration shows *Payment under review* until you verify it in **Payments**. Then it is *Confirmed*.
+
+**Attendees** shows the counts for the caterer (confirmed people, veg / non-veg, adults / children) and each registration. **Add attendee**: tick *free* for crew and invited guests; otherwise record their cash in Payments → Record a payment with the order reference. **Download CSV** lists every person.

@@ -53,12 +53,12 @@ jobs:
       # Sibling iquesters modules from the same branch (falls back to main),
       # linked as path repositories until their releases are on Packagist.
       - name: Link sibling modules
-        if: ${{ 'foundation user-interface organisation' != '' }}
+        if: ${{ 'foundation user-interface organisation commerce' != '' }}
         env:
           BRANCH: ${{ github.head_ref || github.ref_name }}
           GH_TOKEN: ${{ secrets.MODULES_TOKEN || github.token }}
         run: |
-          for dep in foundation user-interface organisation; do
+          for dep in foundation user-interface organisation commerce; do
             url="https://x-access-token:${GH_TOKEN}@github.com/iquesters/${dep}.git"
             git clone --depth 1 --branch "$BRANCH" "$url" "$dep" || git clone --depth 1 "$url" "$dep"
             (cd event && composer config "repositories.$dep" \

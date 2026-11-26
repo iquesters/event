@@ -22,6 +22,10 @@ class EventRegistrar
             throw new \DomainException('Only members of '.$event->organisation?->name.' can register.');
         }
 
+        if ($event->is_paid) {
+            throw new \DomainException('This event has paid registration: use its registration form.');
+        }
+
         $guests = max(0, min(EventRegistration::MAX_GUESTS, $guests));
 
         return DB::transaction(function () use ($user, $event, $guests, $note) {
@@ -32,7 +36,7 @@ class EventRegistrar
                 ->where('event_id', $event->id)
                 ->where('user_id', $user->getAuthIdentifier())
                 ->first();
-            if ($existing?->status === EventRegistration::STATUS_REGISTERED) {
+            if ($existing?->isActive()) {
                 throw new \DomainException("You're already registered.");
             }
 
@@ -61,12 +65,14 @@ class EventRegistrar
             ->update(['status' => EventRegistration::STATUS_CANCELLED]);
     }
 
+    /** Their registration holding places (confirmed, or a paid one waiting for payment). */
     public function registrationOf(Authenticatable $user, Event $event): ?EventRegistration
     {
         return EventRegistration::query()
             ->where('event_id', $event->id)
             ->where('user_id', $user->getAuthIdentifier())
-            ->where('status', EventRegistration::STATUS_REGISTERED)
+            ->whereIn('status', EventRegistration::ACTIVE_STATUSES)
+            ->with('order')
             ->first();
     }
 }

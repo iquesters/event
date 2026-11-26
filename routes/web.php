@@ -30,6 +30,12 @@ Route::middleware('web')->group(function () use ($ulid) {
             Route::put('/{uid}', [EventManageController::class, 'update'])->where('uid', $ulid)->name('update');
             Route::get('/{uid}/attendees', [EventManageController::class, 'attendees'])->where('uid', $ulid)->name('attendees');
             Route::get('/{uid}/attendees.csv', [EventManageController::class, 'export'])->where('uid', $ulid)->name('export');
+            // Paid events: admins add attendees (crew, invited guests, desk payments) and cancel unpaid ones.
+            Route::post('/{uid}/attendees', [EventManageController::class, 'addAttendee'])->where('uid', $ulid)->name('attendees.add');
+            Route::get('/registrations/{uid}', [EventManageController::class, 'registration'])->where('uid', $ulid)->name('registrations.show');
+            Route::post('/registrations/{uid}/cancel', [EventManageController::class, 'cancelRegistration'])->where('uid', $ulid)->name('registrations.cancel');
+            // Banners per device (form event-banners).
+            Route::post('/{uid}/banners', [EventManageController::class, 'banners'])->where('uid', $ulid)->name('banners');
 
             // Feedback: the questions, the results (and CSV), the QR poster.
             Route::get('/{uid}/feedback', [EventFeedbackManageController::class, 'results'])->where('uid', $ulid)->name('feedback.results');
@@ -45,6 +51,8 @@ Route::middleware('web')->group(function () use ($ulid) {
             Route::get('/', [EventController::class, 'index'])->name('index');
             Route::get('/{uid}', [EventController::class, 'show'])->where('uid', $ulid)->name('show');
             Route::post('/{uid}/register', [EventController::class, 'register'])->where('uid', $ulid)->name('register');
+            // Paid events: the registration with guests and meals; then the pay page.
+            Route::post('/{uid}/pay-register', [EventController::class, 'payRegister'])->where('uid', $ulid)->name('pay-register');
             Route::delete('/{uid}/register', [EventController::class, 'cancel'])->where('uid', $ulid)->name('cancel');
             // Feedback (the QR poster links here).
             Route::get('/{uid}/feedback', [EventFeedbackController::class, 'show'])->where('uid', $ulid)->name('feedback.show');

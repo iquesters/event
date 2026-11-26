@@ -53,6 +53,8 @@ class EventSeeder extends BaseSeeder
                         'record' => [
                             ['form' => 'event-details', 'mode' => 'view'],
                             ['html' => '/events/manage/{uid}/links'],
+                            // Banners per device (shown on the event pages).
+                            ['form' => 'event-banners', 'mode' => 'edit', 'title' => 'Banners'],
                         ],
                         'dt-options' => [
                             'columns' => [
