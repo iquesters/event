@@ -74,7 +74,19 @@ class EventTest extends TestCase
         Storage::disk('public')->assertExists($event->cover_image);
         $this->get('/e/'.$event->uid)->assertOk()->assertSee($event->coverUrl(), false)->assertSee('--theme-from: #e11d48', false)
             // The Google Maps link: the map there, and "Open in Maps".
-            ->assertSee('https://maps.google.com/maps?q=22.57%2C88.36&amp;z=15&amp;output=embed', false)->assertSee('Open in Maps');
+            ->assertSee('https://maps.google.com/maps?q=22.57%2C88.36&amp;z=16&amp;output=embed', false)->assertSee('Open in Maps')
+            // The app's tab icon, and Share instead of Sign in.
+            ->assertSee('rel="icon"', false)->assertSee('id="share-event"', false)->assertDontSee('>Sign in<', false);
+
+        // A short share link is followed to its place (once, remembered): the map pins that place, not the typed address.
+        \Illuminate\Support\Facades\Http::fake(['maps.app.goo.gl/*' => \Illuminate\Support\Facades\Http::response('', 302, ['Location' => 'https://www.google.com/maps/place/Tribeni+Tissues+Vidyapith/@23.0034738,88.4069033,17z/data=!3m1!4b1!4m6!3m5!8m2!3d23.0034738!4d88.4069033'])]);
+        $event->forceFill(['maps_url' => 'https://maps.app.goo.gl/UFSwP3ciwRVW2k4v8'])->save();
+        $this->assertSame('https://maps.google.com/maps?q=23.0034738%2C88.4069033&z=16&output=embed', $event->fresh()->mapEmbedUrl());
+        $event->fresh()->mapEmbedUrl();
+        \Illuminate\Support\Facades\Http::assertSentCount(1);
+        $this->assertSame(['coords' => '22.5,88.3'], Event::mapsPlace('https://maps.google.com/?q=22.5,88.3'));
+        $this->assertSame(['name' => 'School Hall'], Event::mapsPlace('https://www.google.com/maps/search/?api=1&query=School+Hall'));
+        $event->forceFill(['maps_url' => 'https://www.google.com/maps/place/Hall/@22.57,88.36,17z'])->save();
 
         // Remove it: the drawn cover again.
         $old = $event->cover_image;

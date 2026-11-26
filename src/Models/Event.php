@@ -163,19 +163,74 @@ class Event extends Model
         if ($link === '' || $this->isOnline()) {
             return null;
         }
-        $query = null;
-        if (preg_match('/@(-?\d+\.\d+),(-?\d+\.\d+)/', $link, $m)) {
-            $query = $m[1].','.$m[2];
-        } else {
-            parse_str((string) parse_url($link, PHP_URL_QUERY), $params);
-            $query = $params['q'] ?? $params['query'] ?? null;
-            if (! $query && preg_match('#/place/([^/@]+)#', $link, $m)) {
-                $query = urldecode(str_replace('+', ' ', $m[1]));
-            }
-        }
-        $query = $query ?: trim($this->venue.' '.$this->address);
+        // A short share link (maps.app.goo.gl/…) names nothing itself: follow it once.
+        $full = self::expandMapsLink($link);
+        $place = self::mapsPlace($full) ?? self::mapsPlace($link);
+        // The link's exact place (its coordinates), else what it names, else the venue.
+        $query = $place['coords'] ?? $place['name'] ?? trim($this->venue.' '.$this->address);
 
-        return $query === '' ? null : 'https://maps.google.com/maps?q='.urlencode($query).'&z=15&output=embed';
+        return $query === '' ? null : 'https://maps.google.com/maps?q='.urlencode($query).'&z=16&output=embed';
+    }
+
+    /**
+     * Where a Google Maps link points: {coords: "lat,lng"} (the place's own pin
+     * !3d…!4d…, else the view's @lat,lng) and/or {name} (?q= or /place/Name).
+     *
+     * @return array{coords?: string, name?: string}|null
+     */
+    public static function mapsPlace(string $link): ?array
+    {
+        $place = [];
+        if (preg_match('/!3d(-?\d+(?:\.\d+)?)!4d(-?\d+(?:\.\d+)?)/', $link, $m)
+            || preg_match('/@(-?\d+\.\d+),(-?\d+\.\d+)/', $link, $m)) {
+            $place['coords'] = $m[1].','.$m[2];
+        }
+        parse_str((string) parse_url($link, PHP_URL_QUERY), $params);
+        $name = $params['q'] ?? $params['query'] ?? null;
+        if (! $name && preg_match('#/place/([^/@?]+)#', $link, $m)) {
+            $name = urldecode(str_replace('+', ' ', $m[1]));
+        }
+        if (is_string($name) && trim($name) !== '') {
+            // ?q=lat,lng is coordinates too.
+            preg_match('/^\s*-?\d+\.\d+\s*,\s*-?\d+\.\d+\s*$/', $name) ? ($place['coords'] ??= preg_replace('/\s+/', '', $name)) : ($place['name'] = trim($name));
+        }
+
+        return $place === [] ? null : $place;
+    }
+
+    /** The full address behind a short Maps link (followed once, remembered); the link itself when it isn't short or can't be followed. */
+    public static function expandMapsLink(string $link): string
+    {
+        if (! preg_match('#^https?://(maps\.app\.goo\.gl|goo\.gl/maps)/#i', $link)) {
+            return $link;
+        }
+
+        $key = 'event-maps-link:'.sha1($link);
+        if (is_string($known = \Illuminate\Support\Facades\Cache::get($key))) {
+            return $known;
+        }
+        $url = $link;
+        try {
+            for ($hop = 0; $hop < 4; $hop++) {
+                $response = \Illuminate\Support\Facades\Http::timeout(5)->withoutRedirecting()->get($url);
+                $next = $response->header('Location');
+                if (! $response->redirect() || ! $next) {
+                    break;
+                }
+                $url = $next;
+                if (! preg_match('#^https?://(maps\.app\.goo\.gl|goo\.gl)/#i', $url)) {
+                    break;
+                }
+            }
+        } catch (\Throwable $e) {
+            return $link; // not remembered: tried again next time
+        }
+        // Remembered only once it leads somewhere (a link never changes where it points).
+        if ($url !== $link) {
+            \Illuminate\Support\Facades\Cache::forever($key, $url);
+        }
+
+        return $url;
     }
 
     /** The cover image's URL, or null (the page then draws one in the theme's colours). */

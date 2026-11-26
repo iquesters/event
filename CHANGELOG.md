@@ -5,6 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed (the public event page)
+- **No ticket names or prices before signing in**: the Registration card says only *Tickets available*, *Only N tickets left* (when every ticket is limited and 10 or fewer are left) or *Sold out*, and *Sign in to see the tickets and prices…*. The prices show on the event page after signing in.
+- **Share instead of Sign in** in the header: the phone's share sheet, else *Link copied* (the button under the details already leads to sign-in and the form).
+- **The map pins the place of the Google Maps link**: a short share link (`maps.app.goo.gl/…`) is followed once (remembered) to its place and coordinates. Before, the map searched the typed venue and address, which Google could match to another place.
+- **The app's tab icon** on the public page and the QR poster (they had none, so browsers showed a default).
+
 ### Fixed
 - **Requires `iquesters/user-interface` ^2.2 and `iquesters/organisation` ^2.2**: the attendees page uses user-interface's table partial (`components.table`, new in 2.2) and the public page uses `OrganisationContext::rememberVisit()` (new in organisation 2.2); with ^2.1 older versions could be installed and those pages would fail.
 

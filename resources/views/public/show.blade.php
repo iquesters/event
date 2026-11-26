@@ -4,6 +4,8 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{{ $event->title }} · {{ $event->organisation?->name }}</title>
+    {{-- The app's tab icon, as on every other page. --}}
+    <link rel="icon" href="{{ \Iquesters\UserInterface\Support\Assets::faviconUrl() }}">
     <meta name="description" content="{{ \Illuminate\Support\Str::limit((string) $event->description, 160) ?: $event->title }}">
     {{-- Shared links show the cover and the title. --}}
     <meta property="og:title" content="{{ $event->title }}">
@@ -53,9 +55,11 @@
         @if ($logoUrl)<img src="{{ $logoUrl }}" alt="" class="avatar">@else<span class="avatar small">{{ mb_substr((string) $event->organisation?->name, 0, 1) }}</span>@endif
         {{ $event->organisation?->name }}
     </a>
-    @guest
-        <a href="{{ route('events.show', ['uid' => $event->uid, 'register' => 1]) }}" class="small text-decoration-none fw-semibold" style="color: var(--theme-from);">Sign in</a>
-    @endguest
+    {{-- Share the page: the phone's share sheet, else copy the link. --}}
+    <button type="button" id="share-event" class="btn btn-sm btn-light rounded-pill px-3 fw-semibold d-inline-flex align-items-center gap-2" style="color: var(--theme-from);"
+            data-url="{{ route('events.public', $event->uid) }}" data-title="{{ $event->title }}">
+        <i class="fas fa-share-nodes"></i><span data-label>Share</span>
+    </button>
 </header>
 
 <main class="container pb-5" style="max-width: 1080px;">
@@ -114,25 +118,22 @@
             {{-- Registration --}}
             <div class="glass p-3 p-md-4 mb-4">
                 <div class="section-label mb-3">Registration</div>
+                {{-- Only whether tickets are left: names and prices show after signing in. --}}
                 @if ($tickets !== [])
-                    <ul class="list-unstyled mb-3">
-                        @foreach ($tickets as $ticket)
-                            <li class="d-flex justify-content-between gap-3 py-2 {{ $loop->first ? '' : 'border-top' }}">
-                                <div>
-                                    <div class="fw-semibold">{{ $ticket['name'] }}</div>
-                                    @if ($ticket['includes'])<div class="small text-muted">Includes {{ $ticket['includes'] }}</div>@endif
-                                    <div class="small">@include('event::partials.ticket-membership', ['ticket' => $ticket, 'event' => $event, 'money' => $money])</div>
-                                </div>
-                                <div class="text-end">
-                                    <div class="fw-bold text-nowrap">{{ $ticket['price'] > 0 ? $money($ticket['price']) : 'Free' }}</div>
-                                    {{-- Limited tickets: how many are left. --}}
-                                    @if ($ticket['left'] !== null)
-                                        <div class="small fw-semibold {{ $ticket['left'] === 0 ? 'text-danger' : ($ticket['left'] <= 10 ? 'text-warning-emphasis' : 'text-muted') }}">{{ $ticket['left'] === 0 ? 'Sold out' : $ticket['left'].' left' }}</div>
-                                    @endif
-                                </div>
-                            </li>
-                        @endforeach
-                    </ul>
+                    @php
+                        $lefts = array_column($tickets, 'left');
+                        $limited = $lefts !== [] && ! in_array(null, $lefts, true);
+                        $left = $limited ? array_sum($lefts) : null;
+                    @endphp
+                    <div class="d-flex align-items-center gap-2 mb-3 fw-semibold">
+                        @if ($limited && $left === 0)
+                            <i class="fas fa-circle-xmark text-danger"></i><span class="text-danger">Sold out</span>
+                        @elseif ($limited && $left <= 10)
+                            <i class="fas fa-fire text-warning"></i><span>Only {{ $left }} {{ $left === 1 ? 'ticket' : 'tickets' }} left</span>
+                        @else
+                            <i class="fas fa-ticket" style="color: var(--theme-from);"></i><span>Tickets available</span>
+                        @endif
+                    </div>
                 @endif
 
                 @if ($closedReason)
@@ -143,7 +144,7 @@
                 @else
                     <p class="small text-muted mb-3">
                         @if ($event->capacity !== null){{ $event->seatsLeft() }} of {{ $event->capacity }} places left. @endif
-                        {{ $event->is_paid ? 'Sign in, choose a ticket for you and each guest, then pay by UPI.' : 'Sign in and register; bring guests if you like.' }}
+                        {{ $event->is_paid ? 'Sign in to see the tickets and prices, register yourself and your guests, then pay by UPI.' : 'Sign in and register; bring guests if you like.' }}
                     </p>
                     <a href="{{ route('events.show', ['uid' => $event->uid, 'register' => 1]) }}" class="btn btn-theme w-100">{{ $event->is_paid ? 'Get tickets' : 'Register' }}</a>
                     @if ($event->registration_closes_at)
@@ -177,5 +178,22 @@
         </div>
     </div>
 </main>
+<script>
+    (function () {
+        const button = document.getElementById('share-event');
+        if (!button) return;
+        const label = button.querySelector('[data-label]');
+        const done = (text) => { label.textContent = text; setTimeout(() => { label.textContent = 'Share'; }, 2000); };
+        button.addEventListener('click', async () => {
+            const url = button.dataset.url, title = button.dataset.title;
+            if (navigator.share) {
+                try { await navigator.share({ title, url }); } catch (e) { /* closed */ }
+                return;
+            }
+            try { await navigator.clipboard.writeText(url); done('Link copied'); }
+            catch (e) { window.prompt('Copy this link', url); }
+        });
+    })();
+</script>
 </body>
 </html>

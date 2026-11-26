@@ -137,10 +137,13 @@ class EventPaidRegistrationTest extends TestCase
         $early = Product::query()->find(collect($event->fresh()->paid_settings['tickets'])->firstWhere('name', 'Early bird')['product_id']);
         $this->assertSame([true, 50], [$early->track_stock, $early->stock_quantity]);
 
-        // A limited ticket shows how many are left; at 0, Sold out.
+        // The public page says only whether tickets are left: names and prices after signing in.
         $event->forceFill(['visibility' => Event::VISIBILITY_PUBLIC])->save();
-        $this->get('/e/'.$event->uid)->assertOk()->assertSee('Early bird')->assertSee('50 left');
-        $early->update(['stock_reserved' => 50]);
+        $this->get('/e/'.$event->uid)->assertOk()->assertSee('Tickets available')->assertDontSee('Early bird')->assertDontSee('₹650');
+        // When every ticket is limited: few left, then sold out.
+        Product::query()->whereIn('id', collect($event->fresh()->paid_settings['tickets'])->pluck('product_id'))->update(['track_stock' => true, 'stock_quantity' => 5, 'stock_reserved' => 0]);
+        $this->get('/e/'.$event->uid)->assertOk()->assertSeeText('tickets left');
+        Product::query()->whereIn('id', collect($event->fresh()->paid_settings['tickets'])->pluck('product_id'))->update(['stock_reserved' => 5]);
         $this->get('/e/'.$event->uid)->assertOk()->assertSee('Sold out');
     }
 
@@ -522,7 +525,10 @@ class EventPaidRegistrationTest extends TestCase
         // A bundle dearer than its ticket: its price on the ticket's line (the public page too).
         Product::query()->where('type', 'bundle')->where('organisation_id', $organisation->id)->update(['price' => 900]);
         $event->forceFill(['visibility' => Event::VISIBILITY_PUBLIC])->save();
-        $this->get('/e/'.$event->uid)->assertOk()->assertSee('With Membership 2027: ₹900');
+        $this->actingAs($member)->get('/events/'.$event->uid)->assertOk()->assertSee('With Membership 2027: ₹900');
+        // Not on the public page (prices after signing in).
+        auth()->logout();
+        $this->get('/e/'.$event->uid)->assertOk()->assertDontSee('₹900')->assertDontSee('With Membership 2027');
         $this->register($event, $member)->assertOk();
         $this->actingAs($member)->get('/events/'.$event->uid)->assertOk()->assertSee('waiting for your payment')->assertSee('TTV-MEET-0001');
     }
