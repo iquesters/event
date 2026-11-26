@@ -10,8 +10,8 @@ use Iquesters\Event\Http\Controllers\PublicEventController;
 $ulid = '[0-9A-HJKMNP-TV-Za-hjkmnp-tv-z]{26}';
 
 Route::middleware('web')->group(function () use ($ulid) {
-    // A public event's page (no sign-in).
-    Route::get('e/{slug}', [PublicEventController::class, 'show'])->where('slug', '[a-z0-9-]+')->name('events.public');
+    // A public event's page (no sign-in): /e/{uid}. An old address by name (/e/{slug}) redirects to it.
+    Route::get('e/{key}', [PublicEventController::class, 'show'])->where('key', '[A-Za-z0-9-]+')->name('events.public');
 
     Route::middleware('auth')->group(function () use ($ulid) {
         // Super-admins and organisation admins; the controller limits them to their organisations.
@@ -29,7 +29,15 @@ Route::middleware('web')->group(function () use ($ulid) {
             Route::get('/{uid}/edit', [EventManageController::class, 'edit'])->where('uid', $ulid)->name('edit');
             Route::put('/{uid}', [EventManageController::class, 'update'])->where('uid', $ulid)->name('update');
             Route::get('/{uid}/attendees', [EventManageController::class, 'attendees'])->where('uid', $ulid)->name('attendees');
+            // The Attendees list (generic table): its rows and one record; the registration panel.
+            Route::get('/{uid}/attendees/data', [EventManageController::class, 'attendeesData'])->where('uid', $ulid)->name('attendees.data');
+            Route::get('/{uid}/attendees/data/{registration}', [EventManageController::class, 'attendeeRecord'])->where(['uid' => $ulid, 'registration' => $ulid])->name('attendees.record');
+            Route::get('/registrations/{uid}/summary', [EventManageController::class, 'registrationSummary'])->where('uid', $ulid)->name('registrations.summary');
             Route::get('/{uid}/attendees.csv', [EventManageController::class, 'export'])->where('uid', $ulid)->name('export');
+            // Paid events: admins add attendees (crew, invited guests, desk payments) and cancel unpaid ones.
+            Route::post('/{uid}/attendees', [EventManageController::class, 'addAttendee'])->where('uid', $ulid)->name('attendees.add');
+            Route::get('/registrations/{uid}', [EventManageController::class, 'registration'])->where('uid', $ulid)->name('registrations.show');
+            Route::post('/registrations/{uid}/cancel', [EventManageController::class, 'cancelRegistration'])->where('uid', $ulid)->name('registrations.cancel');
 
             // Feedback: the questions, the results (and CSV), the QR poster.
             Route::get('/{uid}/feedback', [EventFeedbackManageController::class, 'results'])->where('uid', $ulid)->name('feedback.results');
@@ -45,6 +53,9 @@ Route::middleware('web')->group(function () use ($ulid) {
             Route::get('/', [EventController::class, 'index'])->name('index');
             Route::get('/{uid}', [EventController::class, 'show'])->where('uid', $ulid)->name('show');
             Route::post('/{uid}/register', [EventController::class, 'register'])->where('uid', $ulid)->name('register');
+            // Paid events: the registration with guests and meals; then the pay page.
+            Route::post('/{uid}/pay-register', [EventController::class, 'payRegister'])->where('uid', $ulid)->name('pay-register');
+            Route::post('/{uid}/pay-quote', [EventController::class, 'payQuote'])->where('uid', $ulid)->name('pay-quote');
             Route::delete('/{uid}/register', [EventController::class, 'cancel'])->where('uid', $ulid)->name('cancel');
             // Feedback (the QR poster links here).
             Route::get('/{uid}/feedback', [EventFeedbackController::class, 'show'])->where('uid', $ulid)->name('feedback.show');

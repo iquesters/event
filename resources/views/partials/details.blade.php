@@ -1,5 +1,6 @@
 {{-- An event's details (event page and public page). --}}
-<div class="card border-0 shadow-sm">
+<div class="card border-0 shadow-sm overflow-hidden">
+    @include('event::partials.cover', ['event' => $event, 'ratio' => '3 / 1'])
     <div class="card-body">
         <div class="d-flex flex-wrap gap-1 mb-2">
             @if ($event->type)<span class="badge text-bg-light">{{ $event->type }}</span>@endif
@@ -22,7 +23,7 @@
             </dd>
             @if ($event->venue || $event->address)
                 <dt class="col-sm-3 text-muted fw-normal"><i class="fas fa-fw fa-location-dot"></i> Where</dt>
-                <dd class="col-sm-9" style="white-space: pre-line;">{{ $event->venue }}@if ($event->venue && $event->address){{ "\n" }}@endif{{ $event->address }}</dd>
+                <dd class="col-sm-9" style="white-space: pre-line;">{{ $event->venue }}@if ($event->venue && $event->address){{ "\n" }}@endif{{ $event->address }}@if ($event->maps_url && ! $event->isOnline()) <a href="{{ $event->maps_url }}" target="_blank" rel="noopener nofollow" class="d-block small mt-1"><i class="fas fa-map"></i> Open in Maps</a>@endif</dd>
             @endif
             @if ($event->online_url)
                 <dt class="col-sm-3 text-muted fw-normal"><i class="fas fa-fw fa-video"></i> Online</dt>

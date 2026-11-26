@@ -88,5 +88,7 @@ class EventSeeder extends BaseSeeder
 
         // The module's form schemas (rebuilt on every seed).
         EventForms::syncAll();
+        // The Attendees list (generic table).
+        \Iquesters\Event\Support\EventTables::ensureAttendees();
     }
 }

@@ -7,6 +7,7 @@ use Diglactic\Breadcrumbs\ServiceProvider as BreadcrumbsServiceProvider;
 use Illuminate\Foundation\Testing\RefreshDatabase;
 use Illuminate\Support\Facades\Cache;
 use Illuminate\Support\Str;
+use Iquesters\Commerce\CommerceServiceProvider;
 use Iquesters\Event\EventServiceProvider;
 use Iquesters\Event\Models\Event;
 use Iquesters\Event\Tests\Fixtures\User;
@@ -44,6 +45,7 @@ abstract class TestCase extends Orchestra
             FoundationServiceProvider::class,
             UserInterfaceServiceProvider::class,
             OrganisationServiceProvider::class,
+            CommerceServiceProvider::class,
             EventServiceProvider::class,
         ];
     }
