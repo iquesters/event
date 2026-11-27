@@ -13,6 +13,17 @@
 
     @include('event::manage.partials.registration-card', ['event' => $event, 'registration' => $registration, 'payUrl' => $payUrl])
 
+    @if ($editFormId)
+        {{-- Form schema event-registration-admin-edit-{event uid}; {uid} = the registration. Any time. --}}
+        <div class="card border-0 shadow-sm" id="edit">
+            <div class="card-body">
+                <h6 class="fs-6 mb-1">Correct the details</h6>
+                <p class="small text-muted mb-3">Names, mobiles, gender, meals and members' details. Each change is kept below. Tickets, adult or child, membership and the number of guests stay as they are.</p>
+                @include('userinterface::components.form', ['id' => $editFormId, 'entity_uid' => $registration->uid, 'formData' => json_encode($editFormData, JSON_UNESCAPED_UNICODE)])
+            </div>
+        </div>
+    @endif
+
     @if ($canCancel)
         <div class="card border-0 shadow-sm">
             <div class="card-body small">

@@ -206,6 +206,8 @@ class EventPaidRegistrar
         });
 
         static::logInfo('Paid registration', ['event' => $event->uid, 'registration' => $registration->uid, 'people' => count($people), 'admin' => $admin]);
+        // The email: payment due, or confirmed when there's nothing to pay (notifications module, if installed).
+        EventNotifications::registered($registration->fresh(['order', 'event.organisation', 'user']));
 
         return $registration->fresh(['order', 'event']);
     }
@@ -366,6 +368,8 @@ class EventPaidRegistrar
                 'age_group' => ($p['age_group'] ?? 'adult') === 'child' ? 'child' : 'adult',
                 'member' => $member,
                 'member_details' => $kept,
+                // What they entered (e.g. school_level, school_year), to show again when the details are corrected.
+                'member_input' => $member && $details ? array_intersect_key($p, array_flip($fieldIds)) : [],
                 'ticket_id' => ! empty($p['ticket']) ? (int) $p['ticket'] : null,
                 'role' => $role,
             ];

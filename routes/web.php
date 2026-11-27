@@ -38,6 +38,8 @@ Route::middleware('web')->group(function () use ($ulid) {
             Route::post('/{uid}/attendees', [EventManageController::class, 'addAttendee'])->where('uid', $ulid)->name('attendees.add');
             Route::get('/registrations/{uid}', [EventManageController::class, 'registration'])->where('uid', $ulid)->name('registrations.show');
             Route::post('/registrations/{uid}/cancel', [EventManageController::class, 'cancelRegistration'])->where('uid', $ulid)->name('registrations.cancel');
+            // Correct a registration's details (names, mobiles, meals, a member's details): any time.
+            Route::put('/registrations/{uid}', [EventManageController::class, 'updateRegistration'])->where('uid', $ulid)->name('registrations.update');
 
             // Feedback: the questions, the results (and CSV), the QR poster.
             Route::get('/{uid}/feedback', [EventFeedbackManageController::class, 'results'])->where('uid', $ulid)->name('feedback.results');
@@ -56,6 +58,8 @@ Route::middleware('web')->group(function () use ($ulid) {
             // Paid events: the registration with guests and meals; then the pay page.
             Route::post('/{uid}/pay-register', [EventController::class, 'payRegister'])->where('uid', $ulid)->name('pay-register');
             Route::post('/{uid}/pay-quote', [EventController::class, 'payQuote'])->where('uid', $ulid)->name('pay-quote');
+            // The registrant corrects their registration's details until registration closes.
+            Route::put('/{uid}/registration', [EventController::class, 'updateRegistration'])->where('uid', $ulid)->name('registration.update');
             Route::delete('/{uid}/register', [EventController::class, 'cancel'])->where('uid', $ulid)->name('cancel');
             // Feedback (the QR poster links here).
             Route::get('/{uid}/feedback', [EventFeedbackController::class, 'show'])->where('uid', $ulid)->name('feedback.show');

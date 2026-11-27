@@ -381,6 +381,62 @@ class EventPaidRegistrationTest extends TestCase
         $this->assertSame([['year' => 2020], ['year' => 2005]], [$lines[0]->meta['member_details'], $lines[1]->meta['member_details']]);
     }
 
+    public function test_details_are_corrected_by_the_registrant_until_registration_closes_and_by_admins_any_time(): void
+    {
+        $organisation = $this->makeOrganisation();
+        $admin = $this->memberOf($organisation, 'admin');
+        $event = $this->paidEvent($organisation, $admin);
+        $member = $this->memberOf($organisation);
+        $this->register($event, $member, ['guests' => [
+            ['name' => 'Priya', 'member' => true, 'gender' => 'female', 'age_group' => 'adult', 'meal' => 'veg', 'email' => 'priya@example.test', 'phone' => '9800000004'],
+            ['name' => 'Tutun', 'gender' => 'female', 'age_group' => 'child', 'meal' => 'veg'],
+        ]])->assertOk();
+        $registration = EventRegistration::query()->sole();
+        $total = $registration->order->total;
+        $this->assertNotNull(DB::table('form_schemas')->where('slug', \Iquesters\Event\Support\EventRegistrationEditor::slug($event))->first());
+
+        $edit = fn (array $overrides = []) => array_replace_recursive([
+            'name' => 'Rahul Sen', 'phone_code' => '+91', 'phone' => '9800000001', 'gender' => 'male', 'meal' => 'non_veg',
+            'guests' => [
+                ['name' => 'Priya Sen', 'gender' => 'female', 'meal' => 'non_veg', 'phone_code' => '+44', 'phone' => '7700 900123',
+                    // Locked: ignored when sent.
+                    'age_group' => 'child', 'member' => false, 'email' => 'other@example.test'],
+                ['name' => 'Tutun Sen', 'gender' => 'female', 'meal' => 'veg'],
+            ],
+        ], $overrides);
+
+        // The registrant corrects names, mobiles and meals.
+        $this->actingAs($member)->putJson('/events/'.$event->uid.'/registration', $edit())->assertOk();
+        $registration->refresh();
+        $people = $registration->people;
+        $this->assertSame(['Rahul Sen', 'Priya Sen', 'Tutun Sen'], array_column($people, 'name'));
+        $this->assertSame(['non_veg', 'non_veg', 'veg'], array_column($people, 'meal'));
+        $this->assertSame([1, 2], [$registration->veg, $registration->non_veg]);
+        $this->assertSame('+44 7700 900123', $people[1]['phone']);
+        // What decides the price and the membership stays.
+        $this->assertSame(['adult', true, 'priya@example.test'], [$people[1]['age_group'], $people[1]['member'], $people[1]['email']]);
+        $this->assertSame($total, $registration->order->fresh()->total);
+        // History, and the unpaid order's lines follow (the membership will be made for "Priya Sen").
+        $this->assertStringContainsString('Guest 1 name: Priya → Priya Sen', implode(' | ', $registration->edit_history[0]['changes']));
+        $this->assertContains('Priya Sen', $registration->order->lines()->get()->pluck('meta.person')->all());
+
+        // Guests can't be added or removed here.
+        $this->actingAs($member)->putJson('/events/'.$event->uid.'/registration', ['guests' => [$edit()['guests'][0]]] + $edit())
+            ->assertStatus(422)->assertJsonValidationErrors('guests');
+
+        // After registration closes: only admins.
+        $event->forceFill(['registration_open' => false])->save();
+        $this->actingAs($member)->putJson('/events/'.$event->uid.'/registration', $edit(['meal' => 'veg']))->assertStatus(422);
+        $this->actingAs($admin)->putJson('/events/manage/registrations/'.$registration->uid, $edit(['meal' => 'veg']))->assertOk();
+        $this->assertSame('veg', $registration->fresh()->meal);
+        $this->assertTrue($registration->fresh()->edit_history[1]['admin']);
+        // The registration page shows the form and the changes.
+        $this->actingAs($admin)->get('/events/manage/registrations/'.$registration->uid)->assertOk()
+            ->assertSee(\Iquesters\Event\Support\EventRegistrationEditor::adminSlug($event))->assertSee('Registrant meal: Non-veg → Veg');
+        // Not for members of the organisation who aren't its admins.
+        $this->actingAs($this->memberOf($organisation))->putJson('/events/manage/registrations/'.$registration->uid, $edit())->assertForbidden();
+    }
+
     public function test_a_ticket_with_membership_needs_an_email_and_not_a_membership_already_paid(): void
     {
         $organisation = $this->makeOrganisation();

@@ -59,6 +59,10 @@
                         @if ($payUrl)
                             <a href="{{ $payUrl }}" class="btn btn-sm btn-primary">{{ $registration->status === $R::STATUS_UNDER_REVIEW ? 'See payment' : 'Pay now' }}</a>
                         @endif
+                        @if ($editFormId)
+                            {{-- Correct names, mobiles, meals, a member's details: until registration closes. --}}
+                            <a href="#edit-registration" class="btn btn-sm btn-outline-secondary" data-bs-toggle="collapse" role="button" aria-expanded="false" aria-controls="edit-registration"><i class="fas fa-fw fa-pen"></i> Edit details</a>
+                        @endif
                         @if (! $event->isPast() && $event->status !== \Iquesters\Event\Models\Event::STATUS_CANCELLED && ! ($order && $order->isPaid() && (float) $order->total > 0))
                             {{-- Form schema event-registration-cancel (a paid registration only before it's paid). --}}
                             @include('userinterface::components.form', ['id' => \Iquesters\Event\Support\EventForms::CANCEL_REGISTRATION, 'entity_uid' => $event->uid, 'formData' => ''])
@@ -100,6 +104,19 @@
             </div>
         </div>
     </div>
+
+    @if ($editFormId)
+        {{-- Form schema event-registration-edit-{uid}: the same people, their details corrected. --}}
+        <div class="collapse {{ request()->boolean('edit') ? 'show' : '' }}" id="edit-registration">
+            <div class="card border-0 shadow-sm">
+                <div class="card-body">
+                    <h5 class="fs-6 mb-1">Edit your details</h5>
+                    <p class="small text-muted mb-3">You can correct these until registration closes. Your ticket, who is an adult or a child, membership and the number of guests stay as they are.</p>
+                    @include('userinterface::components.form', ['id' => $editFormId, 'entity_uid' => $event->uid, 'formData' => json_encode($editFormData, JSON_UNESCAPED_UNICODE)])
+                </div>
+            </div>
+        </div>
+    @endif
 
     @if ($paidOpen)
         {{-- The paid registration form (form schema event-paid-registration-{uid}): you, your guests, donation, terms → the pay page. --}}

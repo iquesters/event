@@ -15,6 +15,7 @@ use Iquesters\Event\Support\EventFeedback;
 use Iquesters\Event\Support\EventForms;
 use Iquesters\Event\Support\EventPaidRegistrar;
 use Iquesters\Event\Support\EventRegistrar;
+use Iquesters\Event\Support\EventRegistrationEditor;
 use Iquesters\Organisation\Support\OrganisationAccess;
 use Iquesters\Organisation\Support\OrganisationContext;
 
@@ -82,6 +83,9 @@ class EventController extends Controller
             // Closed: new people can still become members (membership on its own).
             'membershipUrl' => Route::has('community.membership') ? route('community.membership', ['organisation' => $event->organisation?->uid]) : null,
             'closedReason' => $event->registrationClosedReason(),
+            // Correcting their details (names, mobiles, meals…), until registration closes.
+            'editFormId' => $registration && EventRegistrationEditor::mayEdit($user, $registration->setRelation('event', $event)) ? EventRegistrationEditor::slug($event) : null,
+            'editFormData' => $registration && is_array($registration->people) ? EventRegistrationEditor::formData($registration) : null,
             'mayRegister' => EventAccess::mayRegister($user, $event),
             'canManage' => EventAccess::canManageEvent($user, $event),
             'feedbackClosed' => $this->feedback->closedReason($user, $event),
@@ -138,6 +142,19 @@ class EventController extends Controller
         abort_unless($event->is_paid, 404);
 
         return response()->json(['success' => true, 'data' => $this->paid->quote($event, $request->all(), $request->user())]);
+    }
+
+    /** The registrant corrects their details (form schema event-registration-edit-{uid}), until registration closes. */
+    public function updateRegistration(Request $request, string $uid): JsonResponse
+    {
+        $event = $this->find($request, $uid);
+        $registration = $this->paid->activeRegistration($request->user(), $event);
+        if (! $registration || ! EventRegistrationEditor::mayEdit($request->user(), $registration->setRelation('event', $event))) {
+            return response()->json(['success' => false, 'message' => $registration ? 'Registration has closed: please contact the organisers to change your details.' : 'You have no registration for this event.'], 422);
+        }
+        app(EventRegistrationEditor::class)->update($registration, $request->all(), $request->user(), false);
+
+        return $this->done($event, 'Your details are saved.');
     }
 
     public function cancel(Request $request, string $uid): JsonResponse

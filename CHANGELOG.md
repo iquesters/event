@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added (emails, with iquesters/notifications)
+- **The person registering gets an email**: *registration received* with the amount and the pay link when payment is due, or *registration confirmed* when there is nothing to pay. Declared by `EventNotifications`, sent by the notifications module (templates editable per organisation). Without that module nothing is sent (`suggest`).
+
+### Added (correcting a registration)
+- **Edit details** on the event page: the person registering corrects names, mobile numbers, gender, meals and members' details (e.g. their batch) of themselves and their guests, **until registration closes** (form schema `event-registration-edit-{event uid}`, `PUT /events/{uid}/registration`).
+- **Admins correct any registration at any time** from its page (*Correct the details*, also linked from the Attendees side panel; form schema `event-registration-admin-edit-{event uid}`, `PUT /events/manage/registrations/{uid}`).
+- **Locked**: tickets, adult or child, membership, the number of guests and a member's email (the membership is theirs). They show read-only; to change them, cancel and register again (unpaid) or use *Add attendee*.
+- **History**: each correction is kept (`edit_history`: when, who, admin or not, what changed, e.g. *Guest 1 meal: Veg → Non-veg*) and shown on the registration. Meal counts follow. An unpaid order's lines follow too, so a membership is made with the corrected name and details.
+- Each person keeps what they entered for the membership details (`member_input`), to show it again.
+- Migration `2026_11_30_000008_add_edit_history_to_event_registrations` (adds a column).
+
 ### Changed (the public event page)
 - **No ticket names or prices before signing in**: the Registration card says only *Tickets available*, *Only N tickets left* (when every ticket is limited and 10 or fewer are left) or *Sold out*, and *Sign in to see the tickets and prices…*. The prices show on the event page after signing in.
 - **Share instead of Sign in** in the header: the phone's share sheet, else *Link copied* (the button under the details already leads to sign-in and the form).
