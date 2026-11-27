@@ -19,6 +19,7 @@ use Iquesters\Event\Models\EventRegistration;
 use Iquesters\Event\Support\EventAccess;
 use Iquesters\Event\Support\EventForms;
 use Iquesters\Event\Support\EventTables;
+use Iquesters\Event\Support\EventRegistrationEditor;
 use Iquesters\Event\Support\EventPaidRegistrar;
 use Iquesters\Event\Support\EventProducts;
 use Iquesters\Commerce\Models\Product;
@@ -298,6 +299,8 @@ class EventManageController extends Controller
         return view('event::manage.registration', [
             'event' => $event,
             'registration' => $registration,
+            'editFormId' => EventRegistrationEditor::mayEdit($request->user(), $registration, true) ? EventRegistrationEditor::adminSlug($event) : null,
+            'editFormData' => is_array($registration->people) ? EventRegistrationEditor::formData($registration) : null,
             'canCancel' => $registration->isActive() && ! ($registration->order?->isPaid() && (float) $registration->order->total > 0),
             'payUrl' => $registration->order && ! $registration->order->isPaid() && Route::has('payment.pay')
                 ? route('payment.pay', $registration->order->uid) : null,
@@ -305,6 +308,21 @@ class EventManageController extends Controller
     }
 
     /** Cancel a registration that isn't paid (its order is cancelled too); form event-registration-admin-cancel, {uid} = the registration. */
+    /** An admin corrects a registration's details (form schema event-registration-admin-edit-{event uid}; {uid} = the registration). */
+    public function updateRegistration(Request $request, string $uid): JsonResponse
+    {
+        $registration = EventRegistration::query()->with(['event', 'order.lines'])->where('uid', $uid)->firstOrFail();
+        $event = $this->find($request, $registration->event->uid);
+        if (! EventRegistrationEditor::mayEdit($request->user(), $registration, true)) {
+            return response()->json(['success' => false, 'message' => 'This registration can no longer be changed (cancelled, or a free registration).'], 422);
+        }
+        app(EventRegistrationEditor::class)->update($registration, $request->all(), $request->user(), true);
+        $message = 'Details of '.$registration->fresh()->displayName().' saved.';
+        session()->flash('success', $message);
+
+        return response()->json(['success' => true, 'message' => $message, 'redirect_url' => route('events.manage.registrations.show', $registration->uid)]);
+    }
+
     public function cancelRegistration(Request $request, string $uid): JsonResponse
     {
         $registration = EventRegistration::query()->with(['event', 'order'])->where('uid', $uid)->firstOrFail();

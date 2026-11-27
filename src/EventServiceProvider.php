@@ -16,6 +16,9 @@ class EventServiceProvider extends BaseServiceProvider
     {
         parent::boot();
 
+        // Its messages (registration received / confirmed), when notifications is installed.
+        \Iquesters\Event\Support\EventNotifications::register();
+
         // The Attendees list's rows (resources/views/records/attendee/summary): only with
         // iquesters/user-interface, which renders them.
         $registry = 'Iquesters\UserInterface\Support\RecordComponents';

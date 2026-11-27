@@ -176,6 +176,9 @@ class EventForms
         }
         self::upsert(self::paidRegistrationSlug($event), 'Registration: '.Str::limit($event->title, 80), self::paidRegistration($event, false));
         self::upsert(self::addAttendeeSlug($event), 'Add attendee: '.Str::limit($event->title, 80), self::paidRegistration($event, true));
+        // Correcting a registration's details: the registrant's form and the admins'.
+        self::upsert(EventRegistrationEditor::slug($event), 'Edit registration: '.Str::limit($event->title, 80), EventRegistrationEditor::form($event, false));
+        self::upsert(EventRegistrationEditor::adminSlug($event), 'Edit registration (admin): '.Str::limit($event->title, 80), EventRegistrationEditor::form($event, true));
     }
 
     public static function paidRegistration(Event $event, bool $admin): array
@@ -216,7 +219,7 @@ class EventForms
             ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true, 'maxLength' => 255],
             ['id' => 'email', 'label' => 'Email', 'type' => 'email', 'required' => ! $admin, 'maxLength' => 255],
             ['id' => 'phone_code', 'label' => 'Country code', 'type' => 'select', 'required' => true, 'default' => '+91', 'options' => $codes],
-            ['id' => 'phone', 'label' => 'Mobile (WhatsApp)', 'type' => 'tel', 'required' => true, 'maxLength' => 20, 'placeholder' => '98000 00000'],
+            ['id' => 'phone', 'label' => 'Mobile (WhatsApp)', 'type' => 'tel', 'required' => true, 'maxLength' => 20, 'placeholder' => 'e.g. 98000 00000'],
             ['id' => 'gender', 'label' => 'Gender', 'type' => 'select', 'required' => true, 'options' => $genders],
             ['id' => 'meal', 'label' => 'Meal', 'type' => 'radio', 'required' => true, 'options' => $meals],
             ...($admin && $sellsMembership
@@ -247,7 +250,7 @@ class EventForms
                         : ['id' => 'email', 'label' => 'Email', 'type' => 'email', 'maxLength' => 255],
                     // An adult's mobile (a child's is yours).
                     ['id' => 'phone_code', 'label' => 'Country code', 'type' => 'select', 'required' => ! $admin, 'default' => '+91', 'options' => $codes, 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']],
-                    ['id' => 'phone', 'label' => 'Mobile', 'type' => 'tel', 'required' => ! $admin, 'maxLength' => 20, 'placeholder' => '98000 00000', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']],
+                    ['id' => 'phone', 'label' => 'Mobile', 'type' => 'tel', 'required' => ! $admin, 'maxLength' => 20, 'placeholder' => 'e.g. 98000 00000', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']],
                     ...($choice ? [array_diff_key($ticket, ['helperText' => 1])] : []),
                 ],
             ],

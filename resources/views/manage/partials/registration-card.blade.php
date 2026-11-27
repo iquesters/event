@@ -44,6 +44,23 @@
                 <p class="mb-2">{{ 1 + $registration->guests }} {{ \Illuminate\Support\Str::plural('person', 1 + $registration->guests) }}</p>
             @endif
             @if ((float) $registration->donation > 0)<p class="mb-2">Donation: {{ $money($registration->donation) }}</p>@endif
+            {{-- Corrections: who changed what, when. --}}
+            @if (! empty($registration->edit_history))
+                <div class="mb-2">
+                    <div class="text-muted mb-1">Changes</div>
+                    <ul class="list-unstyled mb-0">
+                        @foreach (array_reverse($registration->edit_history) as $edit)
+                            <li class="mb-1">
+                                <span class="text-muted">{{ \Illuminate\Support\Carbon::parse($edit['at'])->format('j M, g:i A') }} · {{ $edit['by_name'] ?? 'Someone' }}{{ ! empty($edit['admin']) ? ' (admin)' : '' }}:</span>
+                                {{ implode('; ', (array) ($edit['changes'] ?? [])) }}
+                            </li>
+                        @endforeach
+                    </ul>
+                </div>
+            @endif
+            @if (\Iquesters\Event\Support\EventRegistrationEditor::mayEdit(auth()->user(), $registration, true) && ! request()->routeIs('events.manage.registrations.show'))
+                <a href="{{ route('events.manage.registrations.show', $registration->uid) }}#edit" class="btn btn-sm btn-outline-secondary mb-2"><i class="fas fa-fw fa-pen"></i> Correct the details</a>
+            @endif
             @if ($registration->note)<p class="mb-2 text-muted">Note: {{ $registration->note }}</p>@endif
 
             <div class="d-flex flex-wrap gap-2 align-items-center">

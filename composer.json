@@ -106,6 +106,7 @@
     }
   },
   "suggest": {
-    "iquesters/payment": "The pay page (UPI QR, proof, verification) for paid registrations"
+    "iquesters/payment": "The pay page (UPI QR, proof, verification) for paid registrations",
+    "iquesters/notifications": "Emails people when things happen (registration, payment, membership), with wording each organisation can edit"
   }
 }

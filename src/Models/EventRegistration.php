@@ -59,6 +59,7 @@ class EventRegistration extends Model
         'guests',
         'note',
         'checked_in_at',
+        'edit_history',
         'order_id',
         'name',
         'email',
@@ -77,6 +78,7 @@ class EventRegistration extends Model
     ];
 
     protected $casts = [
+        'edit_history' => 'array',
         'guests' => 'integer',
         'adults' => 'integer',
         'children' => 'integer',
