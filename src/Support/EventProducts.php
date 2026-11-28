@@ -5,6 +5,7 @@ namespace Iquesters\Event\Support;
 use Illuminate\Support\Facades\DB;
 use Iquesters\Commerce\Models\Product;
 use Iquesters\Event\Models\Event;
+use Iquesters\Event\Models\EventRegistration;
 
 /**
  * A paid event's tickets and what people can buy with them.
@@ -27,6 +28,11 @@ class EventProducts
 
     /** Who a ticket is for. */
     public const FOR = ['everyone', 'adults', 'children'];
+
+    /** How its holder attends an "In person and online" event: both (default), in person only, online only. */
+    public const ATTEND = ['both', 'in_person', 'online'];
+
+    public const ATTEND_LABELS = ['both' => 'In person or online', 'in_person' => 'In person', 'online' => 'Online'];
 
     /**
      * Make or update the event's ticket products from the form's rows.
@@ -55,6 +61,8 @@ class EventProducts
                 $adminOnly = filter_var($row['admin_only'] ?? false, FILTER_VALIDATE_BOOLEAN);
                 // Who it's for: everyone, adults, or children up to the event's child age.
                 $for = in_array($row['for'] ?? null, self::FOR, true) ? $row['for'] : 'everyone';
+                // On an "In person and online" event: who may have it (both, in person, online).
+                $attend = in_array($row['attend'] ?? null, self::ATTEND, true) ? $row['attend'] : 'both';
                 // What comes with it (e.g. Lunch, T-shirt): shown to people, kept as the product's description.
                 $includes = trim((string) ($row['includes'] ?? '')) ?: null;
                 $old = ! empty($row['product_id']) ? $previous->get((int) $row['product_id']) : null;
@@ -68,7 +76,7 @@ class EventProducts
                     'description' => $includes ? "Includes: {$includes}" : null,
                 ], $by);
 
-                $tickets[] = ['product_id' => $productId, 'name' => $name, 'price' => $price, 'limit' => $limit, 'includes' => $includes, 'for' => $for, 'admin_only' => $adminOnly, 'sort' => $sort];
+                $tickets[] = ['product_id' => $productId, 'name' => $name, 'price' => $price, 'limit' => $limit, 'includes' => $includes, 'for' => $for, 'attend' => $attend, 'admin_only' => $adminOnly, 'sort' => $sort];
             }
 
             // Tickets taken off the event: off sale.
@@ -106,7 +114,7 @@ class EventProducts
         $products = Product::query()->where('organisation_id', $event->organisation_id)->whereIn('id', $ids)->get()->keyBy('id');
 
         $tickets = $rows
-            ->map(fn ($t) => ['product' => $products->get((int) ($t['product_id'] ?? 0)), 'name' => $t['name'], 'includes' => $t['includes'] ?? null, 'for' => $t['for'] ?? 'everyone', 'admin_only' => (bool) ($t['admin_only'] ?? false), 'membership_product_id' => null, 'bundle' => false])
+            ->map(fn ($t) => ['product' => $products->get((int) ($t['product_id'] ?? 0)), 'name' => $t['name'], 'includes' => $t['includes'] ?? null, 'for' => $t['for'] ?? 'everyone', 'attend' => $t['attend'] ?? 'both', 'admin_only' => (bool) ($t['admin_only'] ?? false), 'membership_product_id' => null, 'bundle' => false])
             ->filter(fn ($t) => $t['product'] && $t['product']->isActive() && ($withAdminOnly || ! $t['admin_only']))
             ->values();
 
@@ -127,6 +135,8 @@ class EventProducts
                 // Inside: the event's tickets it holds (who it's for follows them).
                 'ticket_ids' => $bundle->bundleItems->pluck('product_id')->map(fn ($id) => (int) $id)->intersect($ids)->values()->all(),
                 'for' => 'adults',
+                // In person or online as its event tickets may be had (filled in below).
+                'attend' => 'both',
                 // What's inside the bundle, e.g. "Guest pass + Membership 2027".
                 'includes' => $bundle->bundleItems->pluck('product')->filter()->pluck('name')->implode(' + '),
                 'admin_only' => false,
@@ -135,7 +145,22 @@ class EventProducts
                 'bundle' => true,
             ]);
 
+        // A bundle may be had in person or online as the event tickets inside it may.
+        $attendOf = $tickets->mapWithKeys(fn ($t) => [(int) $t['product']->id => $t['attend']]);
+        $bundles = $bundles->map(function (array $b) use ($attendOf) {
+            $modes = collect($b['ticket_ids'])->map(fn ($id) => $attendOf->get($id))->filter()->unique()->values()->all();
+            $b['attend'] = count($modes) === 1 ? $modes[0] : 'both';
+
+            return $b;
+        });
+
         return $tickets->concat($bundles)->values()->all();
+    }
+
+    /** May this ticket be had by someone attending this way (null: any way)? */
+    public static function allows(array $ticket, ?string $mode): bool
+    {
+        return $mode === null || in_array($ticket['attend'] ?? 'both', ['both', $mode], true);
     }
 
     /**
@@ -144,11 +169,14 @@ class EventProducts
      *
      * @return array<int, array> entries of tickets()
      */
-    public static function ticketsFor(Event $event, string $ageGroup, bool $withAdminOnly = false): array
+    public static function ticketsFor(Event $event, string $ageGroup, bool $withAdminOnly = false, ?string $mode = null): array
     {
         $group = $ageGroup === 'child' ? 'children' : 'adults';
 
-        return array_values(array_filter(self::tickets($event, $withAdminOnly), fn ($t) => ! $t['bundle'] && in_array($t['for'] ?? 'everyone', ['everyone', $group], true)));
+        return array_values(array_filter(self::tickets($event, $withAdminOnly), fn ($t) => ! $t['bundle']
+            && in_array($t['for'] ?? 'everyone', ['everyone', $group], true)
+            // In person and online: the tickets for how they attend.
+            && self::allows($t, $mode)));
     }
 
     /**
@@ -163,11 +191,13 @@ class EventProducts
      *
      * @throws \DomainException with a message for the person
      */
-    public static function choose(Event $event, string $ageGroup, bool $member, ?int $chosenId, bool $admin, callable $hasMembership, string $who): array
+    public static function choose(Event $event, string $ageGroup, bool $member, ?int $chosenId, bool $admin, callable $hasMembership, string $who, ?string $mode = null): array
     {
-        $own = self::ticketsFor($event, $ageGroup, $admin);
+        // In person and online: only the tickets for how they attend.
+        $mode = $event->isHybrid() ? $mode : null;
+        $own = self::ticketsFor($event, $ageGroup, $admin, $mode);
         $ownIds = array_map(fn ($t) => (int) $t['product']->id, $own);
-        $bundles = $ageGroup === 'child' ? [] : array_values(array_filter(self::tickets($event), fn ($t) => $t['bundle'] && array_intersect($t['ticket_ids'] ?? [], $ownIds) !== []));
+        $bundles = $ageGroup === 'child' ? [] : array_values(array_filter(self::tickets($event), fn ($t) => $t['bundle'] && self::allows($t, $mode) && array_intersect($t['ticket_ids'] ?? [], $ownIds) !== []));
 
         if ($chosenId) {
             foreach ([...$own, ...$bundles] as $t) {
@@ -175,7 +205,8 @@ class EventProducts
                     return $t;
                 }
             }
-            throw new \DomainException("{$who}: that ticket isn't for ".($ageGroup === 'child' ? 'a child' : 'an adult').'.');
+            $online = $mode === EventRegistration::ATTEND_ONLINE;
+            throw new \DomainException("{$who}: that ticket isn't for ".($mode ? ($online ? 'someone joining online' : 'someone coming in person').' or ' : '').($ageGroup === 'child' ? 'a child' : 'an adult').'.');
         }
         if ($member && self::sellsMembership($event)) {
             foreach ($bundles as $bundle) {
@@ -188,7 +219,7 @@ class EventProducts
             return $own[0];
         }
         throw new \DomainException($own === []
-            ? "{$who}: this event has no ticket for ".($ageGroup === 'child' ? 'children' : 'adults').'.'
+            ? "{$who}: this event has no ticket for ".($ageGroup === 'child' ? 'children' : 'adults').($mode ? ' '.($mode === EventRegistration::ATTEND_ONLINE ? 'joining online' : 'coming in person') : '').'.'
             : "{$who}: choose a ticket.");
     }
 

@@ -88,6 +88,9 @@ class EventController extends Controller
             'editFormData' => $registration && is_array($registration->people) ? EventRegistrationEditor::formData($registration) : null,
             'mayRegister' => EventAccess::mayRegister($user, $event),
             'canManage' => EventAccess::canManageEvent($user, $event),
+            // In person and online: the link only for those joining online once confirmed (and the organisers).
+            'showOnlineLink' => ! $event->isHybrid() || EventAccess::canManageEvent($user, $event)
+                || ($registration && $registration->status === \Iquesters\Event\Models\EventRegistration::STATUS_REGISTERED && $registration->setRelation('event', $event)->attendsOnline()),
             'feedbackClosed' => $this->feedback->closedReason($user, $event),
             'rating' => $event->isPast() ? $this->feedback->summary($event) : null,
         ]);

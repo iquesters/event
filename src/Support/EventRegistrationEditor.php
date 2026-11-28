@@ -58,15 +58,23 @@ class EventRegistrationEditor
         $pairs = fn (array $map) => array_map(fn ($v, $l) => ['value' => $v, 'label' => $l], array_keys($map), $map);
         $codes = $pairs(EventRegistration::PHONE_CODES);
         $age = (int) $event->paid('child_age');
+        // Meals are for those coming in person: none online; "In person and online": only while In person.
+        $hybrid = $event->isHybrid();
+        $mealFor = fn (array $f) => $event->isOnline() ? [] : [$hybrid ? $f + ['showWhen' => ['field' => 'attend_mode', 'equals' => EventRegistration::ATTEND_IN_PERSON]] : $f];
 
         $fields = [
+            // In person and online: switch how everyone attends (when their tickets allow it).
+            ...($hybrid ? [
+                ['id' => 'attending', 'type' => 'section', 'label' => 'How '.($admin ? 'they' : 'you').' will attend', 'description' => 'Everyone in the registration attends the same way. Switching is possible when the tickets are for both ways (the price stays the same).'],
+                ['id' => 'attend_mode', 'label' => 'Attending', 'type' => 'radio', 'required' => true, 'options' => $pairs(EventRegistration::ATTEND_MODES)],
+            ] : []),
             ['id' => 'you', 'type' => 'section', 'label' => $admin ? 'The person registering' : 'Your details', 'description' => 'Correct names, mobile numbers, meals and details. Tickets, adult or child, membership and the number of guests stay as they are.'],
             ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true, 'maxLength' => 255],
             ['id' => 'email', 'label' => 'Email', 'type' => 'email', 'readonly' => true, 'helperText' => 'The email of the account (a membership is theirs).'],
             ['id' => 'phone_code', 'label' => 'Country code', 'type' => 'select', 'required' => true, 'default' => '+91', 'options' => $codes],
             ['id' => 'phone', 'label' => 'Mobile (WhatsApp)', 'type' => 'tel', 'required' => true, 'maxLength' => 20, 'placeholder' => 'e.g. 98000 00000'],
             ['id' => 'gender', 'label' => 'Gender', 'type' => 'select', 'required' => true, 'options' => $pairs(EventRegistration::GENDERS)],
-            ['id' => 'meal', 'label' => 'Meal', 'type' => 'radio', 'required' => true, 'options' => $pairs(EventRegistration::MEALS)],
+            ...$mealFor(['id' => 'meal', 'label' => 'Meal', 'type' => 'radio', 'required' => true, 'options' => $pairs(EventRegistration::MEALS)]),
             // A member's details (e.g. what they completed at the school), when they are one.
             ...array_map(fn ($f) => $f + ['showWhen' => $member], $memberFields),
             ['id' => 'people', 'type' => 'section', 'label' => 'Guests', 'description' => 'To add or remove a guest, or change who is an adult, a child or a member, '.($admin ? 'cancel and add the registration again (if not paid), or use Add attendee.' : 'please contact the organisers.')],
@@ -80,14 +88,17 @@ class EventRegistrationEditor
                     ['id' => 'age_group', 'label' => 'Adult or child', 'type' => 'select', 'readonly' => true, 'options' => [['value' => 'adult', 'label' => 'Adult (over '.$age.')'], ['value' => 'child', 'label' => 'Child ('.$age.' or under)']]],
                     ['id' => 'member', 'label' => 'Joining as a member?', 'type' => 'checkbox', 'readonly' => true],
                     ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true, 'maxLength' => 255],
+                    ['id' => 'relation', 'label' => $admin ? 'Relation to the registrant' : 'Relation to you', 'type' => 'select', 'required' => true, 'options' => $pairs(EventRegistration::RELATIONS)],
                     ['id' => 'gender', 'label' => 'Gender', 'type' => 'select', 'required' => true, 'options' => $pairs(EventRegistration::GENDERS)],
-                    ['id' => 'meal', 'label' => 'Meal', 'type' => 'select', 'required' => true, 'options' => $pairs(EventRegistration::MEALS)],
+                    ...$mealFor(['id' => 'meal', 'label' => 'Meal', 'type' => 'select', 'required' => true, 'options' => $pairs(EventRegistration::MEALS)]),
                     ...array_map(fn ($f) => $f + ['showWhen' => $guestMember], $memberFields),
                     // A member's email can't change (the membership is theirs); others' can.
                     ['id' => 'member_email', 'label' => 'Email', 'type' => 'email', 'readonly' => true, 'showWhen' => $guestMember],
                     ['id' => 'email', 'label' => 'Email', 'type' => 'email', 'maxLength' => 255, 'showWhen' => ['field' => 'member', 'equals' => false]],
                     ['id' => 'phone_code', 'label' => 'Country code', 'type' => 'select', 'default' => '+91', 'options' => $codes, 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']],
-                    ['id' => 'phone', 'label' => 'Mobile', 'type' => 'tel', 'required' => true, 'maxLength' => 20, 'placeholder' => 'e.g. 98000 00000', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']],
+                    // Optional; a member's is needed.
+                    ['id' => 'phone', 'label' => 'Mobile', 'type' => 'tel', 'maxLength' => 20, 'placeholder' => 'e.g. 98000 00000', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']]
+                        + ($admin ? [] : ['requiredWhen' => $guestMember]),
                 ],
             ],
         ];
@@ -119,10 +130,12 @@ class EventRegistrationEditor
         }
 
         return $values($you) + $prefill + [
+            'attend_mode' => $registration->event ? $registration->event->attendModeFor($registration->attend_mode) : EventRegistration::ATTEND_IN_PERSON,
             'email' => $you['email'] ?? $registration->email ?? $registration->user?->email ?? '',
             'member' => (bool) ($you['member'] ?? false),
             'guests' => array_map(fn (array $p) => $values($p) + [
                 'age_group' => ($p['age_group'] ?? 'adult') === 'child' ? 'child' : 'adult',
+                'relation' => $p['relation'] ?? '',
                 'member' => (bool) ($p['member'] ?? false),
                 'email' => $p['email'] ?? '',
                 'member_email' => $p['email'] ?? '',
@@ -147,22 +160,50 @@ class EventRegistrationEditor
 
         $codes = array_keys(EventRegistration::PHONE_CODES);
         $phone = ['string', 'max:20', 'regex:/^[0-9 ()-]{5,20}$/'];
+        // How they attend: switched on an "In person and online" event, else as it is.
+        $oldMode = $event->attendModeFor($registration->attend_mode);
+        $mode = $event->isHybrid() ? $event->attendModeFor($input['attend_mode'] ?? $oldMode) : $oldMode;
+        $inPerson = $mode === EventRegistration::ATTEND_IN_PERSON;
+        $meal = $inPerson ? ['required', Rule::in(array_keys(EventRegistration::MEALS))] : ['nullable'];
         Validator::make($input, [
+            'attend_mode' => ['nullable', Rule::in(array_keys(EventRegistration::ATTEND_MODES))],
             'name' => ['required', 'string', 'max:255'],
             'phone_code' => ['nullable', Rule::in($codes)],
             'phone' => ['required', ...$phone],
             'gender' => ['required', Rule::in(array_keys(EventRegistration::GENDERS))],
-            'meal' => ['required', Rule::in(array_keys(EventRegistration::MEALS))],
+            'meal' => $meal,
             'guests.*.name' => ['required', 'string', 'max:255'],
+            'guests.*.relation' => ['required', Rule::in(array_keys(EventRegistration::RELATIONS))],
             'guests.*.gender' => ['required', Rule::in(array_keys(EventRegistration::GENDERS))],
-            'guests.*.meal' => ['required', Rule::in(array_keys(EventRegistration::MEALS))],
+            'guests.*.meal' => $meal,
             'guests.*.email' => ['nullable', 'email', 'max:255'],
             'guests.*.phone_code' => ['nullable', Rule::in($codes)],
             'guests.*.phone' => ['nullable', ...$phone],
         ], [
             'phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
             'guests.*.phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
+            'guests.*.relation.required' => 'Choose how this guest is related.',
+            'guests.*.relation.in' => 'Choose how this guest is related.',
+            'meal.required' => 'Choose the meal.',
+            'guests.*.meal.required' => 'Choose the meal.',
         ])->validate();
+
+        // Switching how they attend: only when everyone's ticket is for both ways (the price stays the same),
+        // and coming in person needs places left.
+        if ($mode !== $oldMode) {
+            $tickets = EventProducts::tickets($event, true);
+            foreach ($people as $p) {
+                $ticket = collect($tickets)->first(fn ($t) => (int) $t['product']->id === (int) ($p['ticket_product_id'] ?? 0))
+                    ?? collect($tickets)->first(fn ($t) => $t['name'] === ($p['ticket'] ?? null));
+                if ($ticket && ! EventProducts::allows($ticket, $mode)) {
+                    throw ValidationException::withMessages(['attend_mode' => ($p['name'] ?? 'Someone')."'s ticket (".$ticket['name'].') is for '.strtolower(EventProducts::ATTEND_LABELS[$ticket['attend']]).' only: the price would change. '.($admin ? 'Cancel and add the registration again.' : 'Please contact the organisers.')]);
+                }
+            }
+            $left = $inPerson ? $event->seatsLeft() : null;
+            if (! $admin && $left !== null && $left < count($people)) {
+                throw ValidationException::withMessages(['attend_mode' => $left === 0 ? 'No places are left in person.' : "Only {$left} ".($left === 1 ? 'place is' : 'places are').' left in person.']);
+            }
+        }
 
         $details = app()->bound(MembershipDetails::class) ? app(MembershipDetails::class) : null;
         $fieldIds = $details ? array_column($details->fields($event), 'id') : [];
@@ -177,10 +218,15 @@ class EventRegistrationEditor
             $new = $old;
             $new['name'] = trim((string) $p['name']);
             $new['gender'] = (string) $p['gender'];
-            $new['meal'] = (string) $p['meal'];
+            // Meals are for those coming in person.
+            $new['meal'] = $inPerson ? (string) ($p['meal'] ?? '') : null;
+            if ($i > 0) {
+                $new['relation'] = (string) $p['relation'];
+            }
             $number = trim((string) ($p['phone'] ?? ''));
-            if ($adult && $i > 0 && $number === '' && ! $admin) {
-                $errors[$at.'phone'] = 'Enter this guest\'s mobile number.';
+            // A guest's mobile is optional; a member's is needed.
+            if ($adult && $i > 0 && $number === '' && ! $admin && ! empty($old['member'])) {
+                $errors[$at.'phone'] = 'A member needs their mobile number.';
             }
             $new['phone'] = $number !== '' ? trim(($p['phone_code'] ?? '+91').' '.$number) : ($adult ? ($old['phone'] ?? null) : null);
             // A member's email stays (the membership is theirs); the registrant's is their account's.
@@ -206,13 +252,17 @@ class EventRegistrationEditor
         if ($errors) {
             throw ValidationException::withMessages($errors);
         }
+        if ($mode !== $oldMode) {
+            array_unshift($changes, 'Attending: '.EventRegistration::ATTEND_MODES[$oldMode].' → '.EventRegistration::ATTEND_MODES[$mode]);
+        }
         if ($changes === []) {
             return $registration;
         }
 
-        DB::transaction(function () use ($registration, $updated, $people, $changes, $by, $admin) {
+        DB::transaction(function () use ($registration, $updated, $people, $changes, $by, $admin, $event, $mode) {
             $you = $updated[0];
             $registration->update([
+                'attend_mode' => $event->isHybrid() ? $mode : $registration->attend_mode,
                 'name' => $you['name'],
                 'phone' => $you['phone'],
                 'gender' => $you['gender'],
@@ -243,7 +293,9 @@ class EventRegistrationEditor
                                 ...$meta,
                                 'person' => $new['name'],
                                 'gender' => EventRegistration::GENDERS[$new['gender']] ?? $new['gender'],
-                                'meal' => EventRegistration::MEALS[$new['meal']] ?? $new['meal'],
+                                'meal' => $new['meal'] ? (EventRegistration::MEALS[$new['meal']] ?? $new['meal']) : null,
+                                'attend' => $event->isHybrid() ? EventRegistration::ATTEND_MODES[$mode] : ($meta['attend'] ?? null),
+                                'relation' => EventRegistration::RELATIONS[$new['relation'] ?? ''] ?? null,
                                 'phone' => $new['phone'],
                                 'email' => $new['email'] ?? null,
                                 'member_details' => isset($meta['member_details']) && ! empty($new['member_details']) ? $new['member_details'] : ($meta['member_details'] ?? null),
@@ -256,7 +308,13 @@ class EventRegistrationEditor
             }
         });
 
-        return $registration->fresh();
+        $fresh = $registration->fresh();
+        // Switched to online while confirmed: their link by email.
+        if ($mode !== $oldMode && $mode === EventRegistration::ATTEND_ONLINE && $fresh->status === EventRegistration::STATUS_REGISTERED) {
+            EventNotifications::joinOnline($fresh);
+        }
+
+        return $fresh;
     }
 
     /** "+91 98000 00001" → {phone_code: "+91", phone: "98000 00001"}. */
@@ -275,8 +333,9 @@ class EventRegistrationEditor
     /** What changed, in words: "Guest 1 meal: Veg → Non-veg". */
     private static function differences(string $who, array $old, array $new): array
     {
-        $labels = ['name' => 'name', 'phone' => 'mobile', 'gender' => 'gender', 'meal' => 'meal', 'email' => 'email'];
+        $labels = ['name' => 'name', 'relation' => 'relation', 'phone' => 'mobile', 'gender' => 'gender', 'meal' => 'meal', 'email' => 'email'];
         $show = fn (string $key, $value) => match ($key) {
+            'relation' => EventRegistration::RELATIONS[$value] ?? $value,
             'gender' => EventRegistration::GENDERS[$value] ?? $value,
             'meal' => EventRegistration::MEALS[$value] ?? $value,
             default => $value,

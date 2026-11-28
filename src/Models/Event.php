@@ -40,12 +40,14 @@ class Event extends Model
 
     public const VISIBILITY_PUBLIC = 'public';
 
-    /** Where it happens: in person (venue, address) or online (a link). */
+    /** Where it happens: in person (venue, address), online (a link), or both (each registration chooses). */
     public const LOCATION_IN_PERSON = 'in_person';
 
     public const LOCATION_ONLINE = 'online';
 
-    public const LOCATIONS = [self::LOCATION_IN_PERSON, self::LOCATION_ONLINE];
+    public const LOCATION_HYBRID = 'hybrid';
+
+    public const LOCATIONS = [self::LOCATION_IN_PERSON, self::LOCATION_ONLINE, self::LOCATION_HYBRID];
 
     protected $table = 'events';
 
@@ -291,9 +293,26 @@ class Event extends Model
         return $this->hasMany(EventFeedbackResponse::class);
     }
 
+    /** Online only (no venue). */
     public function isOnline(): bool
     {
         return $this->location_type === self::LOCATION_ONLINE;
+    }
+
+    /** In person and online: each registration says how it attends. */
+    public function isHybrid(): bool
+    {
+        return $this->location_type === self::LOCATION_HYBRID;
+    }
+
+    /** How people attend: the registration's choice on a hybrid event, else the event's own way. */
+    public function attendModeFor(?string $chosen): string
+    {
+        if ($this->isHybrid()) {
+            return $chosen === EventRegistration::ATTEND_ONLINE ? EventRegistration::ATTEND_ONLINE : EventRegistration::ATTEND_IN_PERSON;
+        }
+
+        return $this->isOnline() ? EventRegistration::ATTEND_ONLINE : EventRegistration::ATTEND_IN_PERSON;
     }
 
     public function hasStarted(): bool
@@ -318,10 +337,16 @@ class Event extends Model
         return $this->visibility === self::VISIBILITY_PUBLIC && $this->status !== self::STATUS_DRAFT;
     }
 
-    /** People coming: registrations (confirmed or waiting for payment) plus their guests. */
+    /**
+     * People coming: registrations (confirmed or waiting for payment) plus their
+     * guests. In person and online: only those coming in person (the places are the venue's).
+     */
     public function seatsTaken(): int
     {
-        return (int) $this->registrations()->whereIn('status', EventRegistration::ACTIVE_STATUSES)->sum(DB::raw('1 + guests'));
+        return (int) $this->registrations()
+            ->whereIn('status', EventRegistration::ACTIVE_STATUSES)
+            ->when($this->isHybrid(), fn ($q) => $q->where(fn ($q) => $q->whereNull('attend_mode')->orWhere('attend_mode', '!=', EventRegistration::ATTEND_ONLINE)))
+            ->sum(DB::raw('1 + guests'));
     }
 
     /** A paid-registration setting (paid_settings), with its default. */
@@ -344,7 +369,8 @@ class Event extends Model
             $this->isPast() => 'This event is over.',
             ! $this->registration_open => 'Registration is closed.',
             $this->registration_closes_at !== null && $this->registration_closes_at->isPast() => 'Registration closed on '.$this->registration_closes_at->format('j M Y').'.',
-            $this->seatsLeft() === 0 => 'This event is full.',
+            // In person and online: a full venue still leaves joining online.
+            $this->seatsLeft() === 0 && ! $this->isHybrid() => 'This event is full.',
             default => null,
         };
     }

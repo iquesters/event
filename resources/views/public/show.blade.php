@@ -111,6 +111,7 @@
                     @else
                         <div class="fw-semibold">{{ $event->venue ?: 'To be announced' }}</div>
                         @if ($event->address)<div class="text-muted small text-truncate">{{ $event->address }}</div>@endif
+                        @if ($event->isHybrid())<div class="text-muted small"><i class="fas fa-video me-1"></i>Or join online: the link is shared with people who register online.</div>@endif
                     @endif
                 </div>
             </div>

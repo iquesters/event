@@ -58,25 +58,34 @@ class EventPaidRegistrar
             $detailRules['guests.*.'.$id] = ['nullable'];
         }
 
+        // Meals are for people coming in person: an online-only event asks none; "In person and online": only In person.
+        $meal = match (true) {
+            $event->isHybrid() => ['nullable', 'required_if:attend_mode,'.EventRegistration::ATTEND_IN_PERSON, Rule::in($meals)],
+            $event->isOnline() => ['nullable', Rule::in($meals)],
+            default => ['required', Rule::in($meals)],
+        };
+
         return $detailRules + [
+            'attend_mode' => [$event->isHybrid() ? 'required' : 'nullable', Rule::in(array_keys(EventRegistration::ATTEND_MODES))],
             'name' => ['required', 'string', 'max:255'],
             'email' => [$admin ? 'nullable' : 'required', 'email', 'max:255'],
             'phone_code' => ['nullable', Rule::in($codes)],
             'phone' => ['required', ...$phone],
             'gender' => ['required', Rule::in($genders)],
-            'meal' => ['required', Rule::in($meals)],
+            'meal' => $meal,
             'member' => ['nullable', 'boolean'],
             'ticket' => ['nullable', Rule::in($tickets)],
             'guests' => ['nullable', 'array', 'max:'.(self::MAX_PEOPLE - 1)],
             'guests.*.member' => ['nullable', 'boolean'],
             'guests.*.name' => ['required', 'string', 'max:255'],
+            'guests.*.relation' => ['required', Rule::in(array_keys(EventRegistration::RELATIONS))],
             'guests.*.gender' => ['required', Rule::in($genders)],
             'guests.*.age_group' => ['required', Rule::in(['adult', 'child'])],
-            'guests.*.meal' => ['required', Rule::in($meals)],
+            'guests.*.meal' => $event->isHybrid() ? ['nullable', 'required_if:attend_mode,'.EventRegistration::ATTEND_IN_PERSON, Rule::in($meals)] : $meal,
             'guests.*.email' => ['nullable', 'email', 'max:255', 'required_if_accepted:guests.*.member'],
             'guests.*.phone_code' => ['nullable', Rule::in($codes)],
-            // Every adult guest's mobile (a child's is the registrant's).
-            'guests.*.phone' => [$admin ? 'nullable' : 'required_unless:guests.*.age_group,child', 'nullable', ...$phone],
+            // A guest's mobile is optional; a member's is needed (checked in people(): only an adult can be one).
+            'guests.*.phone' => ['nullable', ...$phone],
             'guests.*.ticket' => ['nullable', Rule::in($tickets)],
             // Empty: no donation; else within the donation product's limits (₹1 or more when it sets none).
             'donation' => ['nullable', 'numeric', 'min:'.$donationLimits['min'], 'max:'.($donationLimits['max'] ?? 10000000)],
@@ -95,11 +104,15 @@ class EventPaidRegistrar
             'donation.min' => "A donation is {$limits} (or leave it empty).",
             'donation.max' => "A donation is {$limits}.",
             'accept_terms.accepted' => 'Please agree to the Terms and the Privacy policy.',
+            'attend_mode.required' => 'Choose how you will attend: in person or online.',
+            'meal.required_if' => 'Choose the meal.',
+            'guests.*.meal.required_if' => 'Choose the meal.',
             'ticket.in' => 'Choose one of this event\'s tickets.',
             'guests.*.ticket.in' => 'Choose one of this event\'s tickets.',
             'phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
             'guests.*.phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
-            'guests.*.phone.required_unless' => 'Enter this guest’s mobile number.',
+            'guests.*.relation.required' => 'Choose how this guest is related to you.',
+            'guests.*.relation.in' => 'Choose how this guest is related to you.',
             'guests.*.email.required_if_accepted' => 'A member needs their email: the membership is theirs.',
         ];
     }
@@ -135,9 +148,11 @@ class EventPaidRegistrar
         // An admin adds someone: linked to their account when the email has one.
         $userId = $admin ? $this->userIdByEmail($data['email'] ?? null) : (int) $user->getAuthIdentifier();
 
-        $people = $this->people($event, $data, $admin);
+        // How they attend: chosen on an "In person and online" event, else the event's own way.
+        $mode = $event->attendModeFor($data['attend_mode'] ?? null);
+        $people = $this->people($event, $data, $admin, $mode);
 
-        $registration = DB::transaction(function () use ($event, $data, &$people, $admin, $by, $userId) {
+        $registration = DB::transaction(function () use ($event, $data, &$people, $admin, $by, $userId, $mode) {
             $event = Event::query()->with('organisation')->whereKey($event->id)->lockForUpdate()->firstOrFail();
 
             $existing = $userId ? EventRegistration::query()->where('event_id', $event->id)->where('user_id', $userId)->first() : null;
@@ -150,9 +165,11 @@ class EventPaidRegistrar
             if (! $admin && ($reason = $event->registrationClosedReason())) {
                 throw new \DomainException($reason);
             }
-            $left = $event->seatsLeft();
+            // The places limit: everyone, or on an "In person and online" event those coming in person.
+            $left = $mode === EventRegistration::ATTEND_ONLINE && $event->isHybrid() ? null : $event->seatsLeft();
             if (! $admin && $left !== null && $left < count($people)) {
-                throw new \DomainException($left === 1 ? 'Only 1 place is left.' : "Only {$left} places are left.");
+                $where = $event->isHybrid() ? ' in person (you can still join online)' : '';
+                throw new \DomainException($left === 0 ? "No places are left{$where}." : ($left === 1 ? "Only 1 place is left{$where}." : "Only {$left} places are left{$where}."));
             }
 
             $values = [
@@ -162,6 +179,8 @@ class EventPaidRegistrar
                 'phone' => $people[0]['phone'],
                 'gender' => $people[0]['gender'],
                 'meal' => $people[0]['meal'],
+                // Kept for an "In person and online" event (else the event's own way).
+                'attend_mode' => $event->isHybrid() ? $mode : null,
                 'guests' => count($people) - 1,
                 'adults' => count(array_filter($people, fn ($p) => $p['age_group'] === 'adult')),
                 'children' => count(array_filter($people, fn ($p) => $p['age_group'] === 'child')),
@@ -185,7 +204,7 @@ class EventPaidRegistrar
                 'name' => $people[0]['name'],
                 'email' => $people[0]['email'],
                 'phone' => $people[0]['phone'],
-            ], $this->items($event, $registration, $people, $admin, $userId, (float) ($data['donation'] ?? 0)), [
+            ], $this->items($event, $registration, $people, $admin, $userId, (float) ($data['donation'] ?? 0), $mode), [
                 // Numbered by commerce (its order_reference_prefix setting).
                 'source' => $admin ? 'admin' : 'event_registration',
                 'ref_type' => 'event_registration',
@@ -238,6 +257,10 @@ class EventPaidRegistrar
         $registration = EventRegistration::query()->whereKey($order->ref_id)->first();
         if ($status && $registration && $registration->status !== $status) {
             $registration->update(['status' => $status]);
+            // Paid and joining online: their link by email.
+            if ($status === EventRegistration::STATUS_REGISTERED) {
+                EventNotifications::joinOnline($registration);
+            }
         }
     }
 
@@ -312,12 +335,13 @@ class EventPaidRegistrar
             ];
         }
 
+        $mode = $event->attendModeFor($data['attend_mode'] ?? null);
         $lines = [];
         foreach ($people as $index => $person) {
             $email = ($e = mb_strtolower(trim((string) $person['email']))) !== '' ? $e : null;
             try {
                 $ticket = EventProducts::choose($event, $person['age_group'], $person['member'], null, false,
-                    fn (int $membershipId) => $this->hasMembership($membershipId, $index === 0 ? $userId : null, $email), $person['who']);
+                    fn (int $membershipId) => $this->hasMembership($membershipId, $index === 0 ? $userId : null, $email), $person['who'], $mode);
                 $lines[] = ['who' => $person['who'], 'ticket' => $ticket['name'], 'price' => round((float) $ticket['product']->price, 2)];
             } catch (\DomainException) {
                 $lines[] = ['who' => $person['who'], 'ticket' => null, 'price' => null];
@@ -333,7 +357,7 @@ class EventPaidRegistrar
     }
 
     /** @return array<int, array{name: string, email: ?string, phone: ?string, gender: string, meal: string, age_group: string, ticket_id: int, role: string}> */
-    private function people(Event $event, array $data, bool $admin = false): array
+    private function people(Event $event, array $data, bool $admin = false, ?string $mode = null): array
     {
         // Membership details (e.g. the school they completed): checked by the membership module.
         $details = app()->bound(MembershipDetails::class) ? app(MembershipDetails::class) : null;
@@ -341,7 +365,9 @@ class EventPaidRegistrar
         $errors = [];
 
         $sellsMembership = EventProducts::sellsMembership($event);
-        $person = function (array $p, string $role, string $at) use ($event, $details, $fieldIds, &$errors, $sellsMembership, $admin) {
+        // Meals are for those coming in person.
+        $inPerson = ($mode ?? $event->attendModeFor(null)) === EventRegistration::ATTEND_IN_PERSON;
+        $person = function (array $p, string $role, string $at) use ($event, $details, $fieldIds, &$errors, $sellsMembership, $admin, $inPerson) {
             // The person registering joins (no question); a guest when ticked; an admin says for each.
             $member = $sellsMembership && ($p['age_group'] ?? 'adult') !== 'child'
                 && (($role === 'registrant' && ! $admin) || filter_var($p['member'] ?? false, FILTER_VALIDATE_BOOLEAN));
@@ -350,6 +376,10 @@ class EventPaidRegistrar
                 $errors[$at.'age_group'] = 'A child can’t join as a member: choose Adult, or answer No to “Joining as a member?”.';
             }
             $phone = trim((string) ($p['phone'] ?? ''));
+            // A guest's mobile is optional; a guest joining as a member needs one (the membership is theirs).
+            if ($member && $role === 'guest' && $phone === '' && ! $admin) {
+                $errors[$at.'phone'] = 'A member needs their mobile number.';
+            }
             $kept = [];
             if ($member && $details) {
                 [$kept, $fieldErrors] = $details->validate($event, array_intersect_key($p, array_flip($fieldIds)));
@@ -364,8 +394,10 @@ class EventPaidRegistrar
                 // With its country code: "+91 98000 00001".
                 'phone' => $phone !== '' ? trim(($p['phone_code'] ?? '+91').' '.$phone) : null,
                 'gender' => (string) $p['gender'],
-                'meal' => (string) $p['meal'],
+                'meal' => $inPerson ? (string) ($p['meal'] ?? '') : null,
                 'age_group' => ($p['age_group'] ?? 'adult') === 'child' ? 'child' : 'adult',
+                // A guest's relation to the person registering.
+                'relation' => $role === 'guest' && isset(EventRegistration::RELATIONS[$p['relation'] ?? '']) ? (string) $p['relation'] : null,
                 'member' => $member,
                 'member_details' => $kept,
                 // What they entered (e.g. school_level, school_year), to show again when the details are corrected.
@@ -393,7 +425,7 @@ class EventPaidRegistrar
      * person's email (the membership is theirs) and isn't for someone who
      * already paid that membership.
      */
-    private function items(Event $event, EventRegistration $registration, array &$people, bool $admin, ?int $userId, float $donation): array
+    private function items(Event $event, EventRegistration $registration, array &$people, bool $admin, ?int $userId, float $donation, ?string $mode = null): array
     {
         $items = [];
         $seen = [];
@@ -407,8 +439,11 @@ class EventPaidRegistrar
                 $admin,
                 fn (int $membershipId) => $this->hasMembership($membershipId, $index === 0 ? $userId : null, $person['email']),
                 $person['name'],
+                $mode,
             );
             $person['ticket'] = $ticket['name'];
+            // Its product: to check it still fits when they change how they attend.
+            $person['ticket_product_id'] = (int) $ticket['product']->id;
             $membershipId = (int) ($ticket['membership_product_id'] ?? 0);
             $person['with_membership'] = $membershipId > 0;
             if ($membershipId) {
@@ -426,7 +461,9 @@ class EventPaidRegistrar
             $items[] = ['product' => (int) $ticket['product']->id, 'meta' => array_filter([
                 'person' => $person['name'],
                 'gender' => EventRegistration::GENDERS[$person['gender']] ?? $person['gender'],
-                'meal' => EventRegistration::MEALS[$person['meal']] ?? $person['meal'],
+                'meal' => $person['meal'] ? (EventRegistration::MEALS[$person['meal']] ?? $person['meal']) : null,
+                'attend' => $event->isHybrid() && $mode ? EventRegistration::ATTEND_MODES[$mode] : null,
+                'relation' => EventRegistration::RELATIONS[$person['relation'] ?? ''] ?? null,
                 'age_group' => $person['age_group'],
                 'ticket' => $ticket['name'],
                 'role' => $person['role'],

@@ -16,7 +16,7 @@
 
     <div class="row g-3">
         <div class="col-12 col-lg-8">
-            @include('event::partials.details', ['event' => $event])
+            @include('event::partials.details', ['event' => $event, 'showOnlineLink' => $showOnlineLink ?? true])
         </div>
 
         {{-- Registration --}}
@@ -54,6 +54,11 @@
                                 <i class="fas fa-fw fa-indian-rupee-sign"></i> Registered: waiting for your payment
                             @endif
                             @if ($registration->guests) · {{ 1 + $registration->guests }} people @endif
+                            @if ($registration->attendLabel()) · {{ $registration->attendLabel() }} @endif
+                            {{-- Joining online and confirmed: their link. --}}
+                            @if ($registration->status === $R::STATUS_REGISTERED && $event->isHybrid() && $registration->attendsOnline() && $event->online_url)
+                                <div class="mt-1"><i class="fas fa-fw fa-video"></i> <a href="{{ $event->online_url }}" target="_blank" rel="noopener nofollow">Join online</a></div>
+                            @endif
                             @if ($order)<div class="mt-1">Order <span class="font-monospace">{{ $order->reference }}</span> · {{ $money($order->total) }}</div>@endif
                         </div>
                         @if ($payUrl)
