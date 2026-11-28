@@ -60,7 +60,7 @@ class EventNotifications
         ]);
         $types->register('event.registration.confirmed', [
             'label' => 'Registration confirmed (nothing to pay)',
-            'description' => 'A registration with nothing to pay (e.g. free tickets, crew added by an admin) is confirmed at once.',
+            'description' => EventWords::t('A registration with nothing to pay (e.g. free tickets, crew added by an admin) is confirmed at once.'),
             'module' => 'event',
             'variables' => $variables,
             'sample' => $sample,
@@ -78,14 +78,14 @@ class EventNotifications
                 'organisation' => 'Organisation',
                 'event' => 'Event',
                 'date' => 'Date and time',
-                'people' => 'How many people',
+                'people' => 'How many join online',
                 'online_url' => 'The link to join',
                 'event_url' => 'Event page link',
             ],
             'sample' => ['online_url' => 'https://meet.google.com/abc-defg-hij'] + array_intersect_key($sample, array_flip(['name', 'organisation', 'event', 'date', 'people', 'event_url'])),
             'defaults' => ['email' => [
                 'subject' => 'Your link to join {{event}} online',
-                'body' => "Dear {{name}},\n\nYou're registered to join **{{event}}** online ({{date}}) for {{people}}.\n\n[Join online]({{online_url}})\n\nThe link: {{online_url}}\n\nPlease keep it to yourself. It also stays on the event page while you're signed in.\n\n[See the event]({{event_url}})\n\n{{organisation}}",
+                'body' => "Dear {{name}},\n\nYou're registered for **{{event}}** ({{date}}): {{people}} joining online.\n\n[Join online]({{online_url}})\n\nThe link: {{online_url}}\n\nPlease keep it to yourself. It also stays on the event page while you're signed in.\n\n[See the event]({{event_url}})\n\n{{organisation}}",
             ]],
         ]);
     }
@@ -98,10 +98,11 @@ class EventNotifications
         }
         $registration->loadMissing(['event.organisation', 'user']);
         $event = $registration->event;
-        if (! $event || ! $registration->attendsOnline() || trim((string) $event->online_url) === '') {
+        // Anyone in it joining online (the registrant or a guest): the registrant gets the link.
+        if (! $event || ! $registration->anyOnline() || trim((string) $event->online_url) === '') {
             return;
         }
-        $people = 1 + (int) $registration->guests;
+        $people = $registration->onlineCount();
 
         (self::SENDER)::send('event.online.join', $event->organisation_id, [
             'email' => $registration->email ?: $registration->user?->email,
@@ -130,11 +131,13 @@ class EventNotifications
         if (! $event || ! $order) {
             return;
         }
-        // Confirmed at once (nothing to pay) and joining online: the email with their link.
-        if ($order->isPaid() && $registration->attendsOnline()) {
+        // Confirmed at once (nothing to pay): those joining online get the link; when nobody
+        // comes in person, that email is all.
+        if ($order->isPaid() && $registration->anyOnline()) {
             self::joinOnline($registration);
-
-            return;
+            if ($registration->onlineCount() >= 1 + (int) $registration->guests) {
+                return;
+            }
         }
         $people = 1 + (int) $registration->guests;
         $money = ($order->currency === 'INR' ? '₹' : $order->currency.' ').number_format((float) $order->total, 2);

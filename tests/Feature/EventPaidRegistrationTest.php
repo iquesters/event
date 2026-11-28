@@ -98,6 +98,32 @@ class EventPaidRegistrationTest extends TestCase
         ]);
     }
 
+    public function test_the_app_can_call_tickets_passes(): void
+    {
+        $organisation = $this->makeOrganisation();
+        $admin = $this->memberOf($organisation, 'admin');
+        ConfProvider::from(\Iquesters\Event\Enums\Module::EVENT)->update(['ticket_word' => 'pass', 'ticket_word_plural' => 'passes']);
+        \Iquesters\Event\Support\EventWords::flush();
+        $event = $this->paidEvent($organisation, $admin);
+
+        // The word, keeping its capital; other words with "tick" stay.
+        $this->assertSame('Add pass · Passes available · tick the box', \Iquesters\Event\Support\EventWords::t('Add ticket · Tickets available · tick the box'));
+        // Forms: the event's (Passes, Add pass) and the registration's (Pass); ids stay.
+        EventForms::syncAll(); // as event:seed does
+        $setup = json_decode(DB::table('form_schemas')->where('slug', EventForms::DETAILS)->value('schema'), true);
+        $tickets = collect($setup['fields'])->firstWhere('id', 'tickets');
+        $this->assertSame(['Passes', 'Add pass'], [$tickets['label'], $tickets['addLabel']]);
+        $registration = collect(json_decode(DB::table('form_schemas')->where('slug', EventForms::paidRegistrationSlug($event))->value('schema'), true)['fields']);
+        $this->assertStringStartsWith('Your details for the organisers. Your pass: Alumnus pass', $registration->firstWhere('id', 'you')['description']);
+        // Messages and pages.
+        $member = $this->memberOf($organisation);
+        $this->register($event, $member, ['ticket' => '999999'])->assertStatus(422)->assertJsonPath('errors.ticket.0', "Choose one of this event's passes.");
+        $this->actingAs($admin)->postJson('/events/manage', ['organisation_id' => $organisation->id, 'title' => 'Picnic', 'starts_at' => now()->addMonth()->format('Y-m-d\TH:i'), 'status' => 'published', 'visibility' => 'members', 'venue' => 'Park', 'is_paid' => true, 'tickets' => []])
+            ->assertStatus(422)->assertJsonPath('errors.tickets.0', 'Add at least one pass with its price.');
+
+        \Iquesters\Event\Support\EventWords::flush();
+    }
+
     public function test_tickets_made_on_the_event_are_commerce_products_and_bundles_come_from_commerce(): void
     {
         $organisation = $this->makeOrganisation();
@@ -541,19 +567,23 @@ class EventPaidRegistrationTest extends TestCase
         $this->assertSame('attend_mode', $fields->where('type', '!=', 'section')->first()['id']);
         $inPerson = ['field' => 'attend_mode', 'equals' => 'in_person'];
         $this->assertSame($inPerson, $fields->firstWhere('id', 'meal')['showWhen']);
-        $this->assertSame($inPerson, collect($fields->firstWhere('id', 'guests')['fields'])->firstWhere('id', 'meal')['showWhen']);
+        // Each guest chooses their own way on their card; their meal follows it.
+        $guestFields = collect($fields->firstWhere('id', 'guests')['fields']);
+        $this->assertTrue($guestFields->firstWhere('id', 'attend_mode')['required']);
+        $this->assertSame($inPerson, $guestFields->firstWhere('id', 'meal')['showWhen']);
 
         $member = $this->memberOf($organisation);
         $this->register($event, $member)->assertStatus(422)->assertJsonValidationErrors('attend_mode');
         $this->register($event, $member, ['attend_mode' => 'in_person', 'meal' => null])->assertStatus(422)->assertJsonValidationErrors('meal');
 
         // The price follows how they attend (the total on the form too).
-        $this->actingAs($member)->postJson('/events/'.$event->uid.'/pay-quote', ['attend_mode' => 'online', 'guests' => [['age_group' => 'adult']]])
+        $this->actingAs($member)->postJson('/events/'.$event->uid.'/pay-quote', ['attend_mode' => 'online', 'guests' => [['age_group' => 'adult', 'attend_mode' => 'online']]])
             ->assertOk()->assertJsonPath('data.lines.0.ticket', 'Online pass')->assertJsonPath('data.total', 400);
 
         // Online, with a guest: no meals asked; no places taken.
         $guest = ['name' => 'Amit', 'relation' => 'sibling', 'gender' => 'male', 'age_group' => 'adult'];
-        $this->register($event, $member, ['attend_mode' => 'online', 'meal' => null, 'guests' => [$guest]])->assertOk();
+        $this->register($event, $member, ['attend_mode' => 'online', 'meal' => null, 'guests' => [$guest]])->assertStatus(422)->assertJsonValidationErrors('guests.0.attend_mode');
+        $this->register($event, $member, ['attend_mode' => 'online', 'meal' => null, 'guests' => [$guest + ['attend_mode' => 'online']]])->assertOk();
         $online = EventRegistration::query()->sole();
         $this->assertSame('online', $online->attend_mode);
         $this->assertSame([null, null], array_column($online->people, 'meal'));
@@ -571,9 +601,9 @@ class EventPaidRegistrationTest extends TestCase
         $this->actingAs($other)->get('/events/'.$event->uid)->assertOk()->assertDontSee('meet.example.test/ttv-meet');
 
         // In person: the places are the venue's (3 people, 2 places).
-        $this->register($event, $other, ['attend_mode' => 'in_person', 'guests' => [$guest + ['meal' => 'veg'], $guest + ['name' => 'Bina', 'meal' => 'veg']]])
+        $this->register($event, $other, ['attend_mode' => 'in_person', 'guests' => [$guest + ['attend_mode' => 'in_person', 'meal' => 'veg'], $guest + ['name' => 'Bina', 'attend_mode' => 'in_person', 'meal' => 'veg']]])
             ->assertStatus(422)->assertJsonPath('message', 'Only 2 places are left in person (you can still join online).');
-        $this->register($event, $other, ['attend_mode' => 'in_person', 'guests' => [$guest + ['meal' => 'non_veg']]])->assertOk();
+        $this->register($event, $other, ['attend_mode' => 'in_person', 'guests' => [$guest + ['attend_mode' => 'in_person', 'meal' => 'non_veg']]])->assertOk();
         $there = EventRegistration::query()->where('user_id', $other->id)->sole();
         $this->assertSame([1, 1], [$there->veg, $there->non_veg]);
         $this->assertSame(0, $event->fresh()->seatsLeft());
@@ -589,6 +619,57 @@ class EventPaidRegistrationTest extends TestCase
         app(OrderService::class)->markPaid($there->order, 'Verified', 1);
         $this->actingAs($admin)->get('/events/manage/'.$event->uid.'/attendees')->assertOk()->assertSee('2 in person · 2 online');
         $this->assertSame('Online', $online->fresh()->attendLabel());
+    }
+
+    public function test_in_person_and_online_each_guest_chooses_their_own_way(): void
+    {
+        $organisation = $this->makeOrganisation();
+        $admin = $this->memberOf($organisation, 'admin');
+        $event = $this->paidEvent($organisation, $admin, [
+            'location_type' => 'hybrid',
+            'online_url' => 'https://meet.example.test/ttv-meet',
+            'limit_places' => true,
+            'capacity' => 5,
+            'tickets' => [
+                ['name' => 'Guest pass', 'price' => 600, 'for' => 'adults', 'attend' => 'in_person'],
+                ['name' => 'Online pass', 'price' => 200, 'for' => 'adults', 'attend' => 'online'],
+                ['name' => 'Child', 'price' => 0, 'for' => 'children'],
+            ],
+        ]);
+        $member = $this->memberOf($organisation);
+        $brother = ['name' => 'Amit', 'relation' => 'sibling', 'gender' => 'male', 'age_group' => 'adult', 'attend_mode' => 'online'];
+        $wife = ['name' => 'Priya', 'relation' => 'spouse', 'gender' => 'female', 'age_group' => 'adult', 'attend_mode' => 'in_person'];
+
+        // A guest coming in person needs a meal; one joining online doesn't.
+        $this->register($event, $member, ['attend_mode' => 'in_person', 'guests' => [$brother, $wife]])
+            ->assertStatus(422)->assertJsonValidationErrors('guests.1.meal')->assertJsonMissingValidationErrors('guests.0.meal');
+        // The total: each person's pass for their way.
+        $this->actingAs($member)->postJson('/events/'.$event->uid.'/pay-quote', ['attend_mode' => 'in_person', 'guests' => [$brother, $wife]])
+            ->assertOk()->assertJsonPath('data.lines.1.ticket', 'Online pass')->assertJsonPath('data.lines.2.ticket', 'Guest pass')->assertJsonPath('data.total', 1400);
+
+        // You in person, your brother abroad online, your wife in person.
+        $this->register($event, $member, ['attend_mode' => 'in_person', 'guests' => [$brother, $wife + ['meal' => 'non_veg']]])->assertOk();
+        $registration = EventRegistration::query()->sole();
+        $this->assertSame(['in_person', 'online', 'in_person'], array_column($registration->people, 'attend_mode'));
+        $this->assertSame(['veg', null, 'non_veg'], array_column($registration->people, 'meal'));
+        $this->assertSame(['Alumnus pass', 'Online pass', 'Guest pass'], array_column($registration->people, 'ticket'));
+        $this->assertSame([1, 1, 1], [$registration->online_people, $registration->veg, $registration->non_veg]);
+        $this->assertSame('2 in person · 1 online', $registration->attendLabel());
+        // Only those coming in person take places.
+        $this->assertSame(3, $event->fresh()->seatsLeft());
+
+        // Paid: the registrant gets the link (someone joins online) and sees it.
+        app(OrderService::class)->markPaid($registration->order, 'Verified', 1);
+        $this->actingAs($member)->get('/events/'.$event->uid)->assertOk()->assertSee('meet.example.test/ttv-meet');
+
+        // Switching a guest: the brother's online pass is for online only (the price would change).
+        $edit = EventRegistrationEditor::formData($registration->fresh());
+        $this->assertSame(['online', 'in_person'], array_column($edit['guests'], 'attend_mode'));
+        $this->actingAs($admin)->putJson('/events/manage/registrations/'.$registration->uid, array_replace_recursive($edit, ['guests' => [['attend_mode' => 'in_person', 'meal' => 'veg']]]))
+            ->assertStatus(422)->assertJsonValidationErrors('guests.0.attend_mode');
+        // The wife's pass is for in person only too; the registrant's (with membership) as well. Meals change freely.
+        $this->actingAs($admin)->putJson('/events/manage/registrations/'.$registration->uid, array_replace_recursive($edit, ['guests' => [1 => ['meal' => 'veg']]]))->assertOk();
+        $this->assertSame([2, 0], [$registration->fresh()->veg, $registration->fresh()->non_veg]);
     }
 
     public function test_terms_places_and_who_may_register(): void

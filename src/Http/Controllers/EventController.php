@@ -90,7 +90,7 @@ class EventController extends Controller
             'canManage' => EventAccess::canManageEvent($user, $event),
             // In person and online: the link only for those joining online once confirmed (and the organisers).
             'showOnlineLink' => ! $event->isHybrid() || EventAccess::canManageEvent($user, $event)
-                || ($registration && $registration->status === \Iquesters\Event\Models\EventRegistration::STATUS_REGISTERED && $registration->setRelation('event', $event)->attendsOnline()),
+                || ($registration && $registration->status === \Iquesters\Event\Models\EventRegistration::STATUS_REGISTERED && $registration->setRelation('event', $event)->anyOnline()),
             'feedbackClosed' => $this->feedback->closedReason($user, $event),
             'rating' => $event->isPast() ? $this->feedback->summary($event) : null,
         ]);

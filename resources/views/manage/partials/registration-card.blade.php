@@ -24,11 +24,11 @@
             @if ($registration->people)
                 <div class="table-responsive">
                     <table class="table table-sm mb-2">
-                        <thead><tr class="text-muted"><th>Person</th><th>Ticket</th><th>Gender</th><th>Age</th><th>Meal</th><th class="d-none d-md-table-cell">Contact</th></tr></thead>
+                        <thead><tr class="text-muted"><th>Person</th><th>{{ \Iquesters\Event\Support\EventWords::t('Ticket') }}</th><th>Gender</th><th>Age</th><th>Meal</th><th class="d-none d-md-table-cell">Contact</th></tr></thead>
                         <tbody>
                             @foreach ($registration->people as $person)
                                 <tr>
-                                    <td>{{ $person['name'] ?? '' }} @if (($person['role'] ?? '') === 'registrant')<span class="badge text-bg-light">registrant</span>@elseif (! empty($person['relation']))<span class="text-muted small">({{ \Iquesters\Event\Models\EventRegistration::RELATIONS[$person['relation']] ?? $person['relation'] }})</span>@endif
+                                    <td>{{ $person['name'] ?? '' }} @if (($person['role'] ?? '') === 'registrant')<span class="badge text-bg-light">registrant</span>@elseif (! empty($person['relation']))<span class="text-muted small">({{ \Iquesters\Event\Models\EventRegistration::RELATIONS[$person['relation']] ?? $person['relation'] }})</span>@endif @if ($event->isHybrid()) <span class="badge text-bg-light border">{{ \Iquesters\Event\Models\EventRegistration::ATTEND_MODES[$registration->attendModeOf((array) $person)] }}</span>@endif
                                         {{-- Joining as a member: what they gave (e.g. their batch, "ISC 2005"). --}}
                                         @if (! empty($person['member_details']['summary']))<div class="text-muted">{{ $person['member_details']['summary'] }}</div>@endif</td>
                                     <td>{{ $person['ticket'] ?? '' }}</td>

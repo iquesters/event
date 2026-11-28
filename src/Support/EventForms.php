@@ -130,7 +130,7 @@ class EventForms
                     'helperText' => 'Each person registering picks one, e.g. Pass ₹600, Child ₹0, Crew ₹0 (admins only). Combinations (e.g. the pass with a membership) are bundles made in Commerce → Products: they are offered here automatically.',
                     'fields' => [
                         ['id' => 'product_id', 'type' => 'hidden'],
-                        ['id' => 'name', 'label' => 'Ticket name', 'type' => 'text', 'required' => true, 'maxLength' => 120, 'placeholder' => 'e.g. Pass'],
+                        ['id' => 'name', 'label' => 'Ticket name', 'type' => 'text', 'required' => true, 'maxLength' => 120, 'placeholder' => 'e.g. Standard'],
                         ['id' => 'price', 'label' => 'Price, ₹', 'type' => 'number', 'required' => true, 'min' => 0, 'step' => '0.01', 'placeholder' => '0 for free'],
                         ['id' => 'limit', 'label' => 'How many can be sold', 'type' => 'number', 'min' => 1, 'placeholder' => 'No limit'],
                         ['id' => 'includes', 'label' => "What's included", 'type' => 'text', 'maxLength' => 255, 'placeholder' => 'e.g. Lunch, T-shirt'],
@@ -229,7 +229,7 @@ class EventForms
         $fields = [
             // In person and online: how they attend, first (it decides the meals and the tickets).
             ...($hybrid ? [
-                ['id' => 'attending', 'type' => 'section', 'label' => 'How '.($admin ? 'they' : 'you').' will attend', 'description' => 'Guests attend the same way. Online: the link comes by email once registered.'],
+                ['id' => 'attending', 'type' => 'section', 'label' => 'How '.($admin ? 'they' : 'you').' will attend', 'description' => 'Each guest chooses their own way below. Online: the link comes by email once registered.'],
                 ['id' => 'attend_mode', 'label' => 'Attending', 'type' => 'radio', 'required' => true, 'options' => $pairs(EventRegistration::ATTEND_MODES)],
             ] : []),
             ['id' => 'you', 'type' => 'section', 'label' => $admin ? 'Attendee' : 'You', 'description' => $admin ? 'The person registering (an account with this email is linked).' : trim('Your details for the organisers. '.($mineText ?? ''))],
@@ -256,6 +256,8 @@ class EventForms
                     ...($sellsMembership ? [['id' => 'member', 'label' => 'Joining as a member?', 'type' => 'checkbox', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult'], 'helperText' => 'Yes: they also become a member of '.$organisation.'; their ticket includes the membership.']] : []),
                     ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true, 'maxLength' => 255],
                     ['id' => 'relation', 'label' => $admin ? 'Relation to the attendee' : 'Relation to you', 'type' => 'select', 'required' => true, 'options' => $pairs(EventRegistration::RELATIONS)],
+                    // In person and online: each guest chooses; their meal shows after "In person" (this card's own field).
+                    ...($hybrid ? [['id' => 'attend_mode', 'label' => 'Attending', 'type' => 'select', 'required' => true, 'default' => EventRegistration::ATTEND_IN_PERSON, 'options' => $pairs(EventRegistration::ATTEND_MODES)]] : []),
                     // A member is an adult: "Child" only while "Joining as a member?" is No.
                     ['id' => 'age_group', 'label' => 'Adult or child', 'type' => 'select', 'required' => true, 'default' => 'adult', 'options' => $sellsMembership
                         ? [$ages[0], $ages[1] + ['showWhen' => ['field' => 'member', 'equals' => false]]]
@@ -397,6 +399,8 @@ class EventForms
         if (! Schema::hasTable('form_schemas')) {
             return;
         }
+        // "Ticket" in the app's own word (e.g. "Pass").
+        $schema = EventWords::form($schema);
 
         $json = json_encode($schema, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
         $existing = DB::table('form_schemas')->where('slug', $slug)->first(['uid', 'created_at', 'schema', 'name']);

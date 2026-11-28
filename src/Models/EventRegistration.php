@@ -80,6 +80,7 @@ class EventRegistration extends Model
         'gender',
         'meal',
         'attend_mode',
+        'online_people',
         'adults',
         'children',
         'veg',
@@ -98,6 +99,7 @@ class EventRegistration extends Model
         'children' => 'integer',
         'veg' => 'integer',
         'non_veg' => 'integer',
+        'online_people' => 'integer',
         'donation' => 'decimal:2',
         'people' => 'array',
         'terms_accepted_at' => 'datetime',
@@ -142,10 +144,62 @@ class EventRegistration extends Model
         return $this->event?->attendModeFor($this->attend_mode) === self::ATTEND_ONLINE;
     }
 
-    /** "In person" / "Online" on an "In person and online" event; null otherwise (there is no choice). */
+    /** How many of its people join online (the registrant and guests each choose on an "In person and online" event). */
+    public function onlineCount(): int
+    {
+        $everyone = 1 + (int) $this->guests;
+        if ($this->event?->isOnline()) {
+            return $everyone;
+        }
+        if (! $this->event?->isHybrid()) {
+            return 0;
+        }
+        // Registered before each person chose: everyone the registrant's way.
+        if ((int) $this->online_people === 0 && $this->attendsOnline() && ! $this->choseEach()) {
+            return $everyone;
+        }
+
+        return min($everyone, (int) $this->online_people);
+    }
+
+    /** Anyone in it joining online (they get the link). */
+    public function anyOnline(): bool
+    {
+        return $this->onlineCount() > 0;
+    }
+
+    /** "In person", "Online", or "2 in person · 1 online" on an "In person and online" event; null otherwise. */
     public function attendLabel(): ?string
     {
-        return $this->event?->isHybrid() ? self::ATTEND_MODES[$this->attendsOnline() ? self::ATTEND_ONLINE : self::ATTEND_IN_PERSON] : null;
+        if (! $this->event?->isHybrid()) {
+            return null;
+        }
+        $online = $this->onlineCount();
+        $here = 1 + (int) $this->guests - $online;
+
+        return match (true) {
+            $online === 0 => self::ATTEND_MODES[self::ATTEND_IN_PERSON],
+            $here === 0 => self::ATTEND_MODES[self::ATTEND_ONLINE],
+            default => "{$here} in person · {$online} online",
+        };
+    }
+
+    /** How this person attends (an entry of people): their own choice, else the registration's. */
+    public function attendModeOf(array $person): string
+    {
+        return $this->event ? $this->event->attendModeFor($person['attend_mode'] ?? $this->attend_mode) : self::ATTEND_IN_PERSON;
+    }
+
+    /** Each person's way is kept with them (registered since guests choose for themselves). */
+    private function choseEach(): bool
+    {
+        foreach ((array) $this->people as $person) {
+            if (array_key_exists('attend_mode', (array) $person)) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /** The registrant's name: as entered, else the account's. */

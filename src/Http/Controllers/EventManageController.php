@@ -25,6 +25,7 @@ use Iquesters\Event\Support\EventProducts;
 use Iquesters\Commerce\Models\Product;
 use Illuminate\Validation\ValidationException;
 use Iquesters\Event\Support\FeedbackPresets;
+use Iquesters\Event\Support\EventWords;
 use Iquesters\Foundation\Support\ConfProvider;
 use Iquesters\Foundation\System\Http\ApiResponse;
 use Iquesters\Foundation\System\Traits\Loggable;
@@ -176,7 +177,7 @@ class EventManageController extends Controller
             'non_veg' => $count($confirmed, 'non_veg'),
             'paid' => $event->is_paid ? (float) $confirmed->sum(fn ($r) => (float) $r->order?->total) : null,
             // In person and online: how many of the confirmed people come each way.
-            'online_people' => $event->isHybrid() ? (int) $confirmed->filter(fn ($r) => $r->attend_mode === EventRegistration::ATTEND_ONLINE)->sum(fn ($r) => 1 + (int) $r->guests) : null,
+            'online_people' => $event->isHybrid() ? (int) $confirmed->sum(fn ($r) => $r->setRelation('event', $event)->onlineCount()) : null,
         ];
         if ($totals['online_people'] !== null) {
             $totals['in_person_people'] = $totals['confirmed_people'] - $totals['online_people'];
@@ -284,8 +285,10 @@ class EventManageController extends Controller
             'reference' => $order?->reference,
             'people' => $people,
             'people_label' => $people.' '.($people === 1 ? 'person' : 'people').($r->children ? ' ('.$r->children.' '.($r->children === 1 ? 'child' : 'children').')' : ''),
-            'meals' => $event->is_paid && ! ($event->isHybrid() && $r->attend_mode === EventRegistration::ATTEND_ONLINE) && ! $event->isOnline() ? $r->veg.' veg · '.$r->non_veg.' non-veg' : null,
-            'attend_label' => $event->isHybrid() ? EventRegistration::ATTEND_MODES[$r->attend_mode === EventRegistration::ATTEND_ONLINE ? EventRegistration::ATTEND_ONLINE : EventRegistration::ATTEND_IN_PERSON] : null,
+            // Meals only when someone comes in person.
+            'meals' => $event->is_paid && $r->setRelation('event', $event)->onlineCount() < $people ? $r->veg.' veg · '.$r->non_veg.' non-veg' : null,
+            // In person and online: "In person", "Online" or "2 in person · 1 online".
+            'attend_label' => $r->attendLabel(),
             'total_label' => $order ? $money($order->total) : null,
             'donation_label' => (float) $r->donation > 0 ? 'Donation '.$money($r->donation) : null,
             'status' => $r->status,
@@ -375,7 +378,7 @@ class EventManageController extends Controller
             }
 
             // Paid: one row per person (the caterer's and the desk's list).
-            fputcsv($out, ['Reference', 'Status', 'Person', 'Registrant / guest', 'Relation', 'Attending', 'Gender', 'Age', 'Ticket', 'Meal', 'With membership', 'Email', 'Mobile', 'Registered by', 'Order total', 'Registered at'], ',', '"', '');
+            fputcsv($out, ['Reference', 'Status', 'Person', 'Registrant / guest', 'Relation', 'Attending', 'Gender', 'Age', EventWords::t('Ticket'), 'Meal', 'With membership', 'Email', 'Mobile', 'Registered by', 'Order total', 'Registered at'], ',', '"', '');
             foreach ($registrations as $registration) {
                 foreach ((array) $registration->people as $person) {
                     fputcsv($out, [
@@ -384,7 +387,8 @@ class EventManageController extends Controller
                         $person['name'] ?? '',
                         ($person['role'] ?? '') === 'registrant' ? 'Registrant' : 'Guest',
                         EventRegistration::RELATIONS[$person['relation'] ?? ''] ?? '',
-                        $registration->attendLabel() ?? '',
+                        // Each person's own way.
+                        $event->isHybrid() ? EventRegistration::ATTEND_MODES[$registration->setRelation('event', $event)->attendModeOf((array) $person)] : '',
                         EventRegistration::GENDERS[$person['gender'] ?? ''] ?? '',
                         ($person['age_group'] ?? 'adult') === 'child' ? 'Child' : 'Adult',
                         $person['ticket'] ?? '',
@@ -531,9 +535,9 @@ class EventManageController extends Controller
             'with_membership' => ['nullable', 'boolean'],
             'tickets.*.admin_only' => ['nullable', 'boolean'],
         ], [
-            'tickets.required_if_accepted' => 'Add at least one ticket with its price.',
-            'tickets.*.name.required' => 'Name the ticket (e.g. Standard pass).',
-            'tickets.*.name.distinct' => 'Two tickets have the same name.',
+            'tickets.required_if_accepted' => EventWords::t('Add at least one ticket with its price.'),
+            'tickets.*.name.required' => EventWords::t('Name the ticket (e.g. Standard).'),
+            'tickets.*.name.distinct' => EventWords::t('Two tickets have the same name.'),
             'tickets.*.price.required' => 'Enter the price (0 for free).',
             'capacity.required_if_accepted' => 'How many places?',
             'venue.required_unless' => 'Where is it? Enter the venue (or choose Online).',

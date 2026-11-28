@@ -206,7 +206,7 @@ class EventProducts
                 }
             }
             $online = $mode === EventRegistration::ATTEND_ONLINE;
-            throw new \DomainException("{$who}: that ticket isn't for ".($mode ? ($online ? 'someone joining online' : 'someone coming in person').' or ' : '').($ageGroup === 'child' ? 'a child' : 'an adult').'.');
+            throw new \DomainException(self::word("{$who}: that ticket isn't for ".($mode ? ($online ? 'someone joining online' : 'someone coming in person').' or ' : '').($ageGroup === 'child' ? 'a child' : 'an adult').'.'));
         }
         if ($member && self::sellsMembership($event)) {
             foreach ($bundles as $bundle) {
@@ -218,9 +218,9 @@ class EventProducts
         if (count($own) === 1) {
             return $own[0];
         }
-        throw new \DomainException($own === []
+        throw new \DomainException(self::word($own === []
             ? "{$who}: this event has no ticket for ".($ageGroup === 'child' ? 'children' : 'adults').($mode ? ' '.($mode === EventRegistration::ATTEND_ONLINE ? 'joining online' : 'coming in person') : '').'.'
-            : "{$who}: choose a ticket.");
+            : "{$who}: choose a ticket."));
     }
 
     /**
@@ -330,5 +330,11 @@ class EventProducts
         }
 
         return (int) Product::create($values + ['ref_type' => self::REF_TYPE, 'ref_id' => $event->id, 'created_by' => $by ?? 0])->id;
+    }
+
+    /** A message in the app's word for "ticket". */
+    private static function word(string $text): string
+    {
+        return EventWords::t($text);
     }
 }

@@ -16,10 +16,17 @@ class EventConf extends BaseConf
     /** Whether events can be public (a page anyone can open). */
     protected bool $public_events;
 
+    /** What people get for an event, as the pages and emails call it (e.g. "pass"): one, and several. */
+    protected string $ticket_word;
+
+    protected string $ticket_word_plural;
+
     protected function prepareDefault(BaseConf $default_values)
     {
         $default_values->event_types = 'Meet-up,Reunion,Seminar,Workshop,Sports,Cultural,Fundraiser,Other';
         $default_values->public_events = true;
+        $default_values->ticket_word = 'ticket';
+        $default_values->ticket_word_plural = 'tickets';
     }
 
     protected function rules(): array
@@ -27,6 +34,8 @@ class EventConf extends BaseConf
         return [
             'event_types' => 'string|max:1000',
             'public_events' => 'boolean',
+            'ticket_word' => 'string|min:2|max:30',
+            'ticket_word_plural' => 'string|min:2|max:30',
         ];
     }
 
