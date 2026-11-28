@@ -427,6 +427,6 @@ class EventForms
         $label = mb_strtolower(trim($memberLabel)) ?: 'member';
         $article = in_array(mb_substr($label, 0, 1), ['a', 'e', 'i', 'o', 'u'], true) ? 'an' : 'a';
 
-        return "Tick if this guest is also {$article} {$label} and wants to join {$organisation}: they become a member too, and their ticket includes the membership.";
+        return "Tick if this guest is also {$article} {$label}.";
     }
 }
