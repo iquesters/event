@@ -2,6 +2,8 @@
 
 namespace Iquesters\Event\Support;
 
+use Iquesters\Foundation\Rules\MobileNumber;
+use Iquesters\Foundation\Support\Phone;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Validator;
@@ -56,7 +58,7 @@ class EventRegistrationEditor
         $member = ['field' => 'member', 'equals' => true];
         $guestMember = ['field' => 'member', 'equals' => true];
         $pairs = fn (array $map) => array_map(fn ($v, $l) => ['value' => $v, 'label' => $l], array_keys($map), $map);
-        $codes = $pairs(EventRegistration::PHONE_CODES);
+        $codes = Phone::options();
         $age = (int) $event->paid('child_age');
         // Meals are for those coming in person: none online; "In person and online": only while In person.
         $hybrid = $event->isHybrid();
@@ -161,8 +163,8 @@ class EventRegistrationEditor
             throw ValidationException::withMessages(['guests' => 'The guests can\'t be added or removed here.']);
         }
 
-        $codes = array_keys(EventRegistration::PHONE_CODES);
-        $phone = ['string', 'max:20', 'regex:/^[0-9 ()-]{5,20}$/'];
+        $codes = Phone::codes();
+        $phone = ['string', 'max:25', new MobileNumber()];
         // How each person attends: switched on an "In person and online" event (the registrant at
         // the top, each guest on their card), else as it is.
         $registration->setRelation('event', $event);
@@ -191,8 +193,6 @@ class EventRegistrationEditor
             'guests.*.phone_code' => ['nullable', Rule::in($codes)],
             'guests.*.phone' => ['nullable', ...$phone],
         ], [
-            'phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
-            'guests.*.phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
             'guests.*.relation.required' => 'Choose how this guest is related.',
             'guests.*.relation.in' => 'Choose how this guest is related.',
             'meal.required' => 'Choose the meal.',
@@ -250,7 +250,7 @@ class EventRegistrationEditor
             if ($adult && $i > 0 && $number === '' && ! $admin && ! empty($old['member'])) {
                 $errors[$at.'phone'] = 'A member needs their mobile number.';
             }
-            $new['phone'] = $number !== '' ? trim(($p['phone_code'] ?? '+91').' '.$number) : ($adult ? ($old['phone'] ?? null) : null);
+            $new['phone'] = $number !== '' ? (Phone::format($p['phone_code'] ?? '+91', $number) ?? trim(($p['phone_code'] ?? '+91').' '.$number)) : ($adult ? ($old['phone'] ?? null) : null);
             // A member's email stays (the membership is theirs); the registrant's is their account's.
             if ($i > 0 && empty($old['member'])) {
                 $email = trim((string) ($p['email'] ?? ''));
@@ -348,7 +348,9 @@ class EventRegistrationEditor
     public static function splitPhone(?string $phone): array
     {
         $phone = trim((string) $phone);
-        foreach (array_keys(EventRegistration::PHONE_CODES) as $code) {
+        $codes = Phone::codes();
+        usort($codes, fn ($a, $b) => strlen($b) <=> strlen($a));
+        foreach ($codes as $code) {
             if (Str::startsWith($phone, $code.' ')) {
                 return ['phone_code' => $code, 'phone' => trim(substr($phone, strlen($code)))];
             }

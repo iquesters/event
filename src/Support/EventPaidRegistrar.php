@@ -2,6 +2,8 @@
 
 namespace Iquesters\Event\Support;
 
+use Iquesters\Foundation\Rules\MobileNumber;
+use Iquesters\Foundation\Support\Phone;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Validation\Rule;
@@ -43,10 +45,11 @@ class EventPaidRegistrar
     {
         $genders = array_keys(EventRegistration::GENDERS);
         $meals = array_keys(EventRegistration::MEALS);
-        $codes = array_keys(EventRegistration::PHONE_CODES);
+        $codes = Phone::codes();
         // A ticket is chosen only when there is a choice; empty: picked by age and membership.
         $tickets = array_map(fn ($t) => (string) $t['product']->id, EventProducts::tickets($event, $admin));
-        $phone = ['string', 'max:20', 'regex:/^[0-9 ()-]{5,20}$/'];
+        // A mobile number valid for the country code next to it (every country).
+        $phone = ['string', 'max:25', new MobileNumber()];
         // The membership module's fields (e.g. school_level, school_year): kept here so
         // validate() passes them on; that module checks them (people()).
         $details = app()->bound(MembershipDetails::class) ? app(MembershipDetails::class) : null;
@@ -112,8 +115,6 @@ class EventPaidRegistrar
             'guests.*.attend_mode.required' => 'Choose how this guest will attend: in person or online.',
             'ticket.in' => EventWords::t('Choose one of this event\'s tickets.'),
             'guests.*.ticket.in' => EventWords::t('Choose one of this event\'s tickets.'),
-            'phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
-            'guests.*.phone.regex' => 'Enter the mobile number (digits and spaces), without the country code.',
             'guests.*.relation.required' => 'Choose how this guest is related to you.',
             'guests.*.relation.in' => 'Choose how this guest is related to you.',
             'guests.*.email.required_if_accepted' => 'A member needs their email: the membership is theirs.',
@@ -400,7 +401,8 @@ class EventPaidRegistrar
                 'name' => trim((string) $p['name']),
                 'email' => ($e = trim((string) ($p['email'] ?? ''))) !== '' ? mb_strtolower($e) : null,
                 // With its country code: "+91 98000 00001".
-                'phone' => $phone !== '' ? trim(($p['phone_code'] ?? '+91').' '.$phone) : null,
+                // With its country code, tidied: "+91 98000 00001".
+                'phone' => $phone !== '' ? (Phone::format($p['phone_code'] ?? '+91', $phone) ?? trim(($p['phone_code'] ?? '+91').' '.$phone)) : null,
                 'gender' => (string) $p['gender'],
                 'meal' => $inPerson ? (string) ($p['meal'] ?? '') : null,
                 'attend_mode' => $way,

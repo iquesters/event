@@ -2,6 +2,7 @@
 
 namespace Iquesters\Event\Support;
 
+use Iquesters\Foundation\Support\Phone;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Str;
@@ -190,7 +191,8 @@ class EventForms
         $pairs = fn (array $map) => array_map(fn ($v, $l) => ['value' => $v, 'label' => $l], array_keys($map), $map);
         $genders = $pairs(EventRegistration::GENDERS);
         $meals = $pairs(EventRegistration::MEALS);
-        $codes = $pairs(EventRegistration::PHONE_CODES);
+        // Every country's code (foundation's list, the usual ones first).
+        $codes = Phone::options();
         $age = (int) $event->paid('child_age');
         $ages = [['value' => 'adult', 'label' => 'Adult (over '.$age.')'], ['value' => 'child', 'label' => 'Child ('.$age.' or under)']];
 
@@ -253,7 +255,7 @@ class EventForms
                 'rowLabel' => 'Guest',
                 'addLabel' => 'Add guest',
                 'fields' => [
-                    ...($sellsMembership ? [['id' => 'member', 'label' => 'Joining as a member?', 'type' => 'checkbox', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult'], 'helperText' => 'Yes: they also become a member of '.$organisation.'; their ticket includes the membership.']] : []),
+                    ...($sellsMembership ? [['id' => 'member', 'label' => 'Joining as a member?', 'type' => 'checkbox', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult'], 'helperText' => self::guestMemberHelp($memberLabel, $organisation)]] : []),
                     ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true, 'maxLength' => 255],
                     ['id' => 'relation', 'label' => $admin ? 'Relation to the attendee' : 'Relation to you', 'type' => 'select', 'required' => true, 'options' => $pairs(EventRegistration::RELATIONS)],
                     // In person and online: each guest chooses; their meal shows after "In person" (this card's own field).
@@ -417,5 +419,14 @@ class EventForms
             'created_at' => $existing->created_at ?? now(),
             'updated_at' => now(),
         ]);
+    }
+
+    /** Under a guest's "Joining as a member?": who should tick it, in the app's words (e.g. "an alumnus"). */
+    private static function guestMemberHelp(string $memberLabel, string $organisation): string
+    {
+        $label = mb_strtolower(trim($memberLabel)) ?: 'member';
+        $article = in_array(mb_substr($label, 0, 1), ['a', 'e', 'i', 'o', 'u'], true) ? 'an' : 'a';
+
+        return "Tick if this guest is also {$article} {$label} and wants to join {$organisation}: they become a member too, and their ticket includes the membership.";
     }
 }
