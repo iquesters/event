@@ -5,6 +5,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed (mobile numbers)
+- **Mobile numbers are checked for their country** (foundation's `MobileNumber`): you, each guest, Add attendee and the edit form. An Indian number needs 10 digits starting 6–9, a UAE one a mobile (not a landline), and so on for every country. Kept tidied: `+91 98000 00001`. Numbers already saved are not changed.
+- **Every country's code** in the Country code list (India first, then the usual ones), instead of 24. `EventRegistration::PHONE_CODES` stays for code using it (deprecated).
+- **A guest's "Joining as a member?" says who should tick it**: *Tick if this guest is also an alumnus.* (the app's member label).
+- Requires foundation `^2.2`.
+
 ### Changed (in person and online: each guest chooses)
 - **Each guest says how they attend** (*Attending: In person / Online* on their card); the registrant answers at the top. A person's meal is asked only when they come in person, and each gets the passes for their own way (the total follows).
 - Places count only those coming in person; meals and the veg / non-veg counts too. New column `online_people` (migration `2026_11_30_000011_add_online_people_to_event_registrations`, a column only); registrations made before count everyone the registrant's way.

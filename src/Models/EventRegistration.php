@@ -50,6 +50,7 @@ class EventRegistration extends Model
     ];
 
     /** Country codes for mobile numbers (the first is the default). */
+    /** @deprecated Every country's code is in foundation: Phone::options() / Phone::codes(). Kept for code using it. */
     public const PHONE_CODES = [
         '+91' => 'India (+91)', '+1' => 'USA / Canada (+1)', '+44' => 'UK (+44)', '+971' => 'UAE (+971)',
         '+966' => 'Saudi Arabia (+966)', '+974' => 'Qatar (+974)', '+968' => 'Oman (+968)', '+965' => 'Kuwait (+965)',

@@ -274,7 +274,7 @@ class EventPaidRegistrationTest extends TestCase
         $this->register($event, $member, [
             'guests' => [
                 // No ticket chosen: a member adult → the pass with membership, a child → Child, another adult → Guest pass.
-                ['name' => 'Priya Sen', 'relation' => 'spouse', 'member' => true, 'gender' => 'female', 'age_group' => 'adult', 'meal' => 'non_veg', 'email' => 'priya@example.test', 'phone_code' => '+44', 'phone' => '7700 900123'],
+                ['name' => 'Priya Sen', 'relation' => 'spouse', 'member' => true, 'gender' => 'female', 'age_group' => 'adult', 'meal' => 'non_veg', 'email' => 'priya@example.test', 'phone_code' => '+44', 'phone' => '7911 123456'],
                 ['name' => 'Tutun', 'relation' => 'child', 'gender' => 'female', 'age_group' => 'child', 'meal' => 'veg'],
                 ['name' => 'Amit', 'relation' => 'sibling', 'gender' => 'male', 'age_group' => 'adult', 'meal' => 'veg', 'phone' => '9800000003'],
             ],
@@ -287,7 +287,7 @@ class EventPaidRegistrationTest extends TestCase
         $this->assertSame([4, 3, 1, 3, 1], [1 + $registration->guests, $registration->adults, $registration->children, $registration->veg, $registration->non_veg]);
         $this->assertSame(['Alumnus pass', 'Alumnus pass', 'Child', 'Guest pass'], array_column($registration->people, 'ticket'));
         // Mobile numbers keep their country code (default +91).
-        $this->assertSame(['+91 9800000001', '+44 7700 900123'], [$registration->people[0]['phone'], $registration->people[1]['phone']]);
+        $this->assertSame(['+91 98000 00001', '+44 7911 123456'], [$registration->people[0]['phone'], $registration->people[1]['phone']]);
         // The bundle expands in the order: the event's pass and the membership for each alumnus.
         $this->assertSame(2, $order->lines->where('product_type', 'membership')->count());
         $this->assertSame('TTV-MEET-0001', $order->reference);
@@ -438,7 +438,7 @@ class EventPaidRegistrationTest extends TestCase
         $edit = fn (array $overrides = []) => array_replace_recursive([
             'name' => 'Rahul Sen', 'phone_code' => '+91', 'phone' => '9800000001', 'gender' => 'male', 'meal' => 'non_veg',
             'guests' => [
-                ['name' => 'Priya Sen', 'relation' => 'spouse', 'gender' => 'female', 'meal' => 'non_veg', 'phone_code' => '+44', 'phone' => '7700 900123',
+                ['name' => 'Priya Sen', 'relation' => 'spouse', 'gender' => 'female', 'meal' => 'non_veg', 'phone_code' => '+44', 'phone' => '7911 123456',
                     // Locked: ignored when sent.
                     'age_group' => 'child', 'member' => false, 'email' => 'other@example.test'],
                 ['name' => 'Tutun Sen', 'relation' => 'child', 'gender' => 'female', 'meal' => 'veg'],
@@ -452,7 +452,7 @@ class EventPaidRegistrationTest extends TestCase
         $this->assertSame(['Rahul Sen', 'Priya Sen', 'Tutun Sen'], array_column($people, 'name'));
         $this->assertSame(['non_veg', 'non_veg', 'veg'], array_column($people, 'meal'));
         $this->assertSame([1, 2], [$registration->veg, $registration->non_veg]);
-        $this->assertSame('+44 7700 900123', $people[1]['phone']);
+        $this->assertSame('+44 7911 123456', $people[1]['phone']);
         // What decides the price and the membership stays.
         $this->assertSame(['adult', true, 'priya@example.test'], [$people[1]['age_group'], $people[1]['member'], $people[1]['email']]);
         $this->assertSame($total, $registration->order->fresh()->total);
@@ -684,6 +684,14 @@ class EventPaidRegistrationTest extends TestCase
         $this->register($event, $member, ['ticket' => '999999'])->assertStatus(422)->assertJsonValidationErrors('ticket');
         $this->register($event, $member, ['phone_code' => '+999'])->assertStatus(422)->assertJsonValidationErrors('phone_code');
         $this->register($event, $member, ['phone' => '+91 98000'])->assertStatus(422)->assertJsonValidationErrors('phone');
+        // A real mobile number for its country (every country, foundation's check): too short, or not a mobile.
+        $this->register($event, $member, ['phone' => '98000 0001'])->assertStatus(422)
+            ->assertJsonPath('errors.phone.0', 'Enter a valid India mobile number (e.g. 081234 56789), without the country code.');
+        $this->register($event, $member, ['guests' => [array_replace($guest('A'), ['phone_code' => '+971', 'phone' => '04 123 4567'])]])->assertStatus(422)->assertJsonValidationErrors('guests.0.phone');
+        // The form offers every country, India first.
+        $codes = collect(json_decode(DB::table('form_schemas')->where('slug', EventForms::paidRegistrationSlug($event))->value('schema'), true)['fields'])->firstWhere('id', 'phone_code')['options'];
+        $this->assertSame(['value' => '+91', 'label' => 'India (+91)'], $codes[0]);
+        $this->assertGreaterThan(200, count($codes));
 
         $this->register($event, $this->memberOf($this->makeOrganisation('Other school')))->assertNotFound();
         // The free registration path refuses a paid event.
