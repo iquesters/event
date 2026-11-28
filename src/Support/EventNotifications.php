@@ -69,6 +69,53 @@ class EventNotifications
                 'body' => "Dear {{name}},\n\nYou're registered for **{{event}}** ({{date}}, {{place}}) for {{people}}. See you there!\n\n[See the event]({{event_url}})\n\n{{organisation}}",
             ]],
         ]);
+        $types->register('event.online.join', [
+            'label' => 'Joining online: the link',
+            'description' => 'Someone joining online is confirmed (paid, or nothing to pay): the link to join. Only they get it; it is not on the event page.',
+            'module' => 'event',
+            'variables' => [
+                'name' => 'Name of the person registering',
+                'organisation' => 'Organisation',
+                'event' => 'Event',
+                'date' => 'Date and time',
+                'people' => 'How many people',
+                'online_url' => 'The link to join',
+                'event_url' => 'Event page link',
+            ],
+            'sample' => ['online_url' => 'https://meet.google.com/abc-defg-hij'] + array_intersect_key($sample, array_flip(['name', 'organisation', 'event', 'date', 'people', 'event_url'])),
+            'defaults' => ['email' => [
+                'subject' => 'Your link to join {{event}} online',
+                'body' => "Dear {{name}},\n\nYou're registered to join **{{event}}** online ({{date}}) for {{people}}.\n\n[Join online]({{online_url}})\n\nThe link: {{online_url}}\n\nPlease keep it to yourself. It also stays on the event page while you're signed in.\n\n[See the event]({{event_url}})\n\n{{organisation}}",
+            ]],
+        ]);
+    }
+
+    /** Someone joining online is confirmed: their link (only theirs; never on the public page). */
+    public static function joinOnline(EventRegistration $registration): void
+    {
+        if (! self::available()) {
+            return;
+        }
+        $registration->loadMissing(['event.organisation', 'user']);
+        $event = $registration->event;
+        if (! $event || ! $registration->attendsOnline() || trim((string) $event->online_url) === '') {
+            return;
+        }
+        $people = 1 + (int) $registration->guests;
+
+        (self::SENDER)::send('event.online.join', $event->organisation_id, [
+            'email' => $registration->email ?: $registration->user?->email,
+            'name' => $registration->displayName(),
+            'user_id' => $registration->user_id,
+        ], [
+            'name' => (string) $registration->displayName(),
+            'organisation' => $event->organisation?->name ?? '',
+            'event' => $event->title,
+            'date' => $event->starts_at?->format('D, j M Y, g:i A') ?? '',
+            'people' => $people === 1 ? '1 person' : $people.' people',
+            'online_url' => (string) $event->online_url,
+            'event_url' => Route::has('events.show') ? route('events.show', $event->uid) : '',
+        ], $registration);
     }
 
     /** After a paid registration: payment due, or confirmed when nothing is to pay. */
@@ -83,6 +130,12 @@ class EventNotifications
         if (! $event || ! $order) {
             return;
         }
+        // Confirmed at once (nothing to pay) and joining online: the email with their link.
+        if ($order->isPaid() && $registration->attendsOnline()) {
+            self::joinOnline($registration);
+
+            return;
+        }
         $people = 1 + (int) $registration->guests;
         $money = ($order->currency === 'INR' ? '₹' : $order->currency.' ').number_format((float) $order->total, 2);
 
@@ -95,7 +148,7 @@ class EventNotifications
             'organisation' => $event->organisation?->name ?? '',
             'event' => $event->title,
             'date' => $event->starts_at?->format('D, j M Y, g:i A') ?? '',
-            'place' => $event->isOnline() ? 'Online' : trim(implode(', ', array_filter([$event->venue, $event->address]))),
+            'place' => $registration->attendsOnline() ? 'Online' : trim(implode(', ', array_filter([$event->venue, $event->address]))),
             'people' => $people === 1 ? '1 person' : $people.' people',
             'reference' => $order->reference,
             'amount' => $money,

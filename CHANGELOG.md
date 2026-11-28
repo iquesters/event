@@ -5,6 +5,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Added (in person and online events)
+- **Where: In person and online** (`location_type` `hybrid`): the venue, address, map and the online link together.
+- **How will you attend? In person / Online** first on the registration form (and the add-attendee form), once per registration: the guests attend the same way. Kept as `attend_mode` (migration `2026_11_30_000010_add_attend_mode_to_event_registrations`, a column only).
+- **Meals only for those coming in person**: the meal question (yours and each guest's) shows after *In person*; online people have none, so the veg / non-veg counts stay the caterer's. An online-only event no longer asks for meals.
+- **Places are the venue's**: the places limit counts only those coming in person; a full venue still leaves joining online (*No places are left in person (you can still join online)*).
+- **Tickets for one way of attending** (optional): each ticket's *For: In person or online / In person / Online* (default both). Same price for everyone: leave it. A different online price: add e.g. an *Online pass* for Online; people get the tickets for how they attend (the bundles follow their tickets), and the total on the form follows.
+- **The online link only for those joining online**: once confirmed (paid, or nothing to pay) they get the email *Joining online: the link* (new template `event.online.join`) and see it on the event page; others don't, and the public page never shows it.
+- **Switching** in the edit form (registrant until registration closes, admins any time): only when everyone's ticket is for both ways (the price stays the same) and, to come in person, places are left; kept in the edit history; switching to online when confirmed sends the link.
+- The attendees list shows *In person* / *Online* per registration and *X in person · Y online*; the CSV has an *Attending* column; the registration card shows it.
+
+### Changed (guests on the registration form)
+- **Each guest: name and relation required** (*Relation to you*: spouse, child, parent, brother / sister, other relative, friend, colleague, other). Kept with the person, shown on the registration card, in the attendees CSV (*Relation*) and on the order line; editable with the other details (and in the edit history).
+- **A guest's email and mobile are optional**, needed only for a guest joining as a member (the membership is theirs); before, every adult guest needed a mobile. The form shows their star only after *Joining as a member?* is ticked (user-interface `requiredWhen`); the server checks the same.
+
+## [1.2.0] - 2026-11-27
+
 ### Added (emails, with iquesters/notifications)
 - **The person registering gets an email**: *registration received* with the amount and the pay link when payment is due, or *registration confirmed* when there is nothing to pay. Declared by `EventNotifications`, sent by the notifications module (templates editable per organisation). Without that module nothing is sent (`suggest`).
 

@@ -29,7 +29,7 @@
                                 <div class="fw-semibold text-truncate">{{ $event->title }}</div>
                                 <div class="small text-muted">
                                     {{ $event->starts_at->format('D, j M Y · g:i A') }}
-                                    @if ($event->venue) · {{ $event->venue }} @elseif ($event->online_url) · Online @endif
+                                    @if ($event->venue) · {{ $event->venue }}@if ($event->isHybrid()) + online @endif @elseif ($event->online_url) · Online @endif
                                 </div>
                                 <div class="d-flex flex-wrap gap-1 mt-2">
                                     @if ($event->type)<span class="badge text-bg-light">{{ $event->type }}</span>@endif

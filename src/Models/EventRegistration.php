@@ -36,6 +36,19 @@ class EventRegistration extends Model
 
     public const MEALS = ['veg' => 'Veg', 'non_veg' => 'Non-veg'];
 
+    /** How a registration attends an "In person and online" event. */
+    public const ATTEND_IN_PERSON = 'in_person';
+
+    public const ATTEND_ONLINE = 'online';
+
+    public const ATTEND_MODES = [self::ATTEND_IN_PERSON => 'In person', self::ATTEND_ONLINE => 'Online'];
+
+    /** A guest's relation to the person registering. */
+    public const RELATIONS = [
+        'spouse' => 'Spouse', 'child' => 'Child', 'parent' => 'Parent', 'sibling' => 'Brother / sister',
+        'relative' => 'Other relative', 'friend' => 'Friend', 'colleague' => 'Colleague', 'other' => 'Other',
+    ];
+
     /** Country codes for mobile numbers (the first is the default). */
     public const PHONE_CODES = [
         '+91' => 'India (+91)', '+1' => 'USA / Canada (+1)', '+44' => 'UK (+44)', '+971' => 'UAE (+971)',
@@ -66,6 +79,7 @@ class EventRegistration extends Model
         'phone',
         'gender',
         'meal',
+        'attend_mode',
         'adults',
         'children',
         'veg',
@@ -120,6 +134,18 @@ class EventRegistration extends Model
     public function isActive(): bool
     {
         return in_array($this->status, self::ACTIVE_STATUSES, true);
+    }
+
+    /** Joining online: chose Online on an "In person and online" event, or the event is online only. */
+    public function attendsOnline(): bool
+    {
+        return $this->event?->attendModeFor($this->attend_mode) === self::ATTEND_ONLINE;
+    }
+
+    /** "In person" / "Online" on an "In person and online" event; null otherwise (there is no choice). */
+    public function attendLabel(): ?string
+    {
+        return $this->event?->isHybrid() ? self::ATTEND_MODES[$this->attendsOnline() ? self::ATTEND_ONLINE : self::ATTEND_IN_PERSON] : null;
     }
 
     /** The registrant's name: as entered, else the account's. */

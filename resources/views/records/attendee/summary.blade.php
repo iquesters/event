@@ -1,13 +1,14 @@
 {{--
     Record component "event.attendee": one row of an event's Attendees list. The name,
-    a coloured status badge, contact, the order and its total, people and meals.
+    a coloured status badge, In person / Online (in person and online events), contact,
+    the order and its total, people and meals.
     Plain HTML with __TOKENS__ filled in the browser from the row
     (see user-interface docs/record-components.md).
 --}}
 <div class="d-grid gap-1 small">
     <div class="d-flex justify-content-between align-items-start gap-2">
         <span class="fw-semibold text-truncate">__NAME__</span>
-        <span class="d-flex flex-wrap gap-1 justify-content-end">__ADMIN__ __STATUS__</span>
+        <span class="d-flex flex-wrap gap-1 justify-content-end">__ATTEND__ __ADMIN__ __STATUS__</span>
     </div>
     __CONTACT__
     <div class="d-flex justify-content-between gap-2 text-muted">
@@ -57,6 +58,13 @@
         "fields": {"label": {"paths": ["status_label"]}, "tone": {"paths": ["status_tone"], "fallback": "secondary"}},
         "condition": "label",
         "template": "<span class=\"badge text-bg-__TONE__\">__LABEL__</span>",
+        "fallback_template": ""
+    },
+    "__ATTEND__": {
+        "type": "template",
+        "fields": {"value": {"paths": ["attend_label"]}},
+        "condition": "value",
+        "template": "<span class=\"badge text-bg-light border\">__VALUE__</span>",
         "fallback_template": ""
     },
     "__ADMIN__": {

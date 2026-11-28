@@ -102,12 +102,13 @@ class EventForms
                 ['id' => 'location_type', 'label' => 'Where', 'type' => 'radio', 'required' => true, 'default' => 'in_person', 'options' => [
                     ['value' => 'in_person', 'label' => 'In person'],
                     ['value' => 'online', 'label' => 'Online'],
+                    ['value' => 'hybrid', 'label' => 'In person and online (each person chooses)'],
                 ]],
-                // In person: the venue and address; online: the link.
-                ['id' => 'venue', 'showWhen' => ['field' => 'location_type', 'equals' => 'in_person'], 'label' => 'Venue', 'type' => 'text', 'maxLength' => 255, 'placeholder' => 'e.g. School auditorium'],
-                ['id' => 'address', 'showWhen' => ['field' => 'location_type', 'equals' => 'in_person'], 'label' => 'Address', 'type' => 'textarea', 'rows' => 2, 'maxLength' => 1000],
-                ['id' => 'maps_url', 'showWhen' => ['field' => 'location_type', 'equals' => 'in_person'], 'label' => 'Google Maps link', 'type' => 'url', 'maxLength' => 500, 'placeholder' => 'https://maps.app.goo.gl/…', 'helperText' => 'Optional: in Google Maps, Share → Copy link. The event page then shows the map and "Open in Maps".'],
-                ['id' => 'online_url', 'showWhen' => ['field' => 'location_type', 'equals' => 'online'], 'label' => 'Online link', 'type' => 'url', 'maxLength' => 255, 'placeholder' => 'https://'],
+                // In person: the venue and address; online: the link; both: all of them.
+                ['id' => 'venue', 'showWhen' => ['field' => 'location_type', 'equals' => ['in_person', 'hybrid']], 'label' => 'Venue', 'type' => 'text', 'maxLength' => 255, 'placeholder' => 'e.g. School auditorium'],
+                ['id' => 'address', 'showWhen' => ['field' => 'location_type', 'equals' => ['in_person', 'hybrid']], 'label' => 'Address', 'type' => 'textarea', 'rows' => 2, 'maxLength' => 1000],
+                ['id' => 'maps_url', 'showWhen' => ['field' => 'location_type', 'equals' => ['in_person', 'hybrid']], 'label' => 'Google Maps link', 'type' => 'url', 'maxLength' => 500, 'placeholder' => 'https://maps.app.goo.gl/…', 'helperText' => 'Optional: in Google Maps, Share → Copy link. The event page then shows the map and "Open in Maps".'],
+                ['id' => 'online_url', 'showWhen' => ['field' => 'location_type', 'equals' => ['online', 'hybrid']], 'label' => 'Online link', 'type' => 'url', 'maxLength' => 255, 'placeholder' => 'https://', 'helperText' => 'Sent only to people joining online once they are registered (and shown to them on the event page); never on the public page.'],
                 ['id' => 'description', 'label' => 'Description', 'type' => 'textarea', 'rows' => 5, 'maxLength' => 10000],
                 ['id' => 'look', 'type' => 'section', 'label' => 'Page look', 'description' => 'How the event page looks to people.'],
                 ['id' => 'cover_image', 'label' => 'Cover image', 'type' => 'file', 'accept' => 'image/jpeg,image/png,image/webp', 'helperText' => 'Square works best (e.g. 1000 × 1000). JPG, PNG or WEBP, up to 5 MB. Without one, a cover is made from the title in the colour below.'],
@@ -116,7 +117,7 @@ class EventForms
                 ['id' => 'registration', 'type' => 'section', 'label' => 'Registration', 'description' => 'Who can come, and until when.'],
                 ['id' => 'registration_open', 'label' => 'Registration open', 'type' => 'checkbox'],
                 ['id' => 'limit_places', 'label' => 'Limit the number of places', 'type' => 'checkbox'],
-                ['id' => 'capacity', 'showWhen' => ['field' => 'limit_places', 'equals' => true], 'label' => 'How many places', 'type' => 'number', 'min' => 1, 'helperText' => 'Everyone counts: the person registering and each guest.'],
+                ['id' => 'capacity', 'showWhen' => ['field' => 'limit_places', 'equals' => true], 'label' => 'How many places', 'type' => 'number', 'min' => 1, 'helperText' => 'Everyone counts: the person registering and each guest. In person and online: only those coming in person.'],
                 ['id' => 'registration_closes_at', 'label' => 'Register by', 'type' => 'datetime-local'],
                 ['id' => 'paid', 'type' => 'section', 'label' => 'Tickets', 'description' => 'A free event needs nothing here. For a paid one, tick the box and add each ticket with its price.'],
                 ['id' => 'is_paid', 'label' => 'Registration is paid', 'type' => 'checkbox'],
@@ -138,6 +139,8 @@ class EventForms
                             ['value' => 'children', 'label' => 'Children (up to the age below)'],
                             ['value' => 'everyone', 'label' => 'Everyone'],
                         ]],
+                        // Only for "In person and online" events: tickets for one way of attending (e.g. a cheaper online pass).
+                        ['id' => 'attend', 'label' => 'For (in person and online events)', 'type' => 'select', 'default' => 'both', 'options' => array_map(fn ($v, $l) => ['value' => $v, 'label' => $l], array_keys(EventProducts::ATTEND_LABELS), EventProducts::ATTEND_LABELS)],
                         ['id' => 'admin_only', 'label' => 'Only admins can give it (crew, invited guests)', 'type' => 'checkbox'],
                     ],
                 ],
@@ -202,11 +205,20 @@ class EventForms
         $withMember = fn (array $fields) => array_map(fn ($f) => $f + ['showWhen' => $member], $fields);
 
         // A ticket to choose only when there is a choice (else it's picked from age and membership).
-        $label = fn ($t) => $t['name'].' · '.((float) $t['product']->price > 0 ? '₹'.rtrim(rtrim(number_format((float) $t['product']->price, 2), '0'), '.') : 'Free').(! empty($t['admin_only']) ? ' · admins only' : '');
-        $adultTickets = EventProducts::ticketsFor($event, 'adult', $admin);
-        $childTickets = EventProducts::ticketsFor($event, 'child', $admin);
+        $hybrid = $event->isHybrid();
+        $label = fn ($t) => $t['name'].' · '.((float) $t['product']->price > 0 ? '₹'.rtrim(rtrim(number_format((float) $t['product']->price, 2), '0'), '.') : 'Free')
+            // In person and online: a ticket for one way only says so.
+            .($hybrid && ($t['attend'] ?? 'both') !== 'both' ? ' · '.strtolower(EventProducts::ATTEND_LABELS[$t['attend']]) : '')
+            .(! empty($t['admin_only']) ? ' · admins only' : '');
         // A Ticket list only when a person really has a choice (e.g. Early bird or Standard); admins always.
-        $choice = $admin || count($adultTickets) > 1 || count($childTickets) > 1;
+        // In person and online: a choice within the tickets for one way of attending.
+        $choice = $admin;
+        foreach ($hybrid ? array_keys(EventRegistration::ATTEND_MODES) : [null] as $mode) {
+            $choice = $choice || count(EventProducts::ticketsFor($event, 'adult', $admin, $mode)) > 1 || count(EventProducts::ticketsFor($event, 'child', $admin, $mode)) > 1;
+        }
+        // Meals are for those coming in person: none online; "In person and online": only after In person.
+        $inPerson = ['field' => 'attend_mode', 'equals' => EventRegistration::ATTEND_IN_PERSON];
+        $mealFor = fn (array $f) => $event->isOnline() ? [] : [$hybrid ? $f + ['showWhen' => $inPerson] : $f];
         $mine = $admin ? null : EventProducts::registrantTicket($event);
         $mineText = $mine
             ? 'Your ticket: '.$label($mine).($mine['bundle'] && $sellsMembership ? ' (the membership is included; if you already paid it, you get the plain ticket)' : '').'.'
@@ -215,13 +227,18 @@ class EventForms
         $ticket = ['id' => 'ticket', 'label' => 'Ticket', 'type' => 'select', 'options' => [['value' => '', 'label' => 'Chosen for me'], ...$ticketOptions], 'helperText' => 'Leave "Chosen for me": by age, and with membership for a '.strtolower($memberLabel).'.'];
 
         $fields = [
+            // In person and online: how they attend, first (it decides the meals and the tickets).
+            ...($hybrid ? [
+                ['id' => 'attending', 'type' => 'section', 'label' => 'How '.($admin ? 'they' : 'you').' will attend', 'description' => 'Guests attend the same way. Online: the link comes by email once registered.'],
+                ['id' => 'attend_mode', 'label' => 'Attending', 'type' => 'radio', 'required' => true, 'options' => $pairs(EventRegistration::ATTEND_MODES)],
+            ] : []),
             ['id' => 'you', 'type' => 'section', 'label' => $admin ? 'Attendee' : 'You', 'description' => $admin ? 'The person registering (an account with this email is linked).' : trim('Your details for the organisers. '.($mineText ?? ''))],
             ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true, 'maxLength' => 255],
             ['id' => 'email', 'label' => 'Email', 'type' => 'email', 'required' => ! $admin, 'maxLength' => 255],
             ['id' => 'phone_code', 'label' => 'Country code', 'type' => 'select', 'required' => true, 'default' => '+91', 'options' => $codes],
             ['id' => 'phone', 'label' => 'Mobile (WhatsApp)', 'type' => 'tel', 'required' => true, 'maxLength' => 20, 'placeholder' => 'e.g. 98000 00000'],
             ['id' => 'gender', 'label' => 'Gender', 'type' => 'select', 'required' => true, 'options' => $genders],
-            ['id' => 'meal', 'label' => 'Meal', 'type' => 'radio', 'required' => true, 'options' => $meals],
+            ...$mealFor(['id' => 'meal', 'label' => 'Meal', 'type' => 'radio', 'required' => true, 'options' => $meals]),
             ...($admin && $sellsMembership
                 // Admins add anyone (crew, guests): they say whether the person is a member.
                 ? [['id' => 'member', 'label' => 'Joining as a member', 'type' => 'checkbox'], ...$withMember($memberFields)]
@@ -238,19 +255,21 @@ class EventForms
                 'fields' => [
                     ...($sellsMembership ? [['id' => 'member', 'label' => 'Joining as a member?', 'type' => 'checkbox', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult'], 'helperText' => 'Yes: they also become a member of '.$organisation.'; their ticket includes the membership.']] : []),
                     ['id' => 'name', 'label' => 'Name', 'type' => 'text', 'required' => true, 'maxLength' => 255],
+                    ['id' => 'relation', 'label' => $admin ? 'Relation to the attendee' : 'Relation to you', 'type' => 'select', 'required' => true, 'options' => $pairs(EventRegistration::RELATIONS)],
                     // A member is an adult: "Child" only while "Joining as a member?" is No.
                     ['id' => 'age_group', 'label' => 'Adult or child', 'type' => 'select', 'required' => true, 'default' => 'adult', 'options' => $sellsMembership
                         ? [$ages[0], $ages[1] + ['showWhen' => ['field' => 'member', 'equals' => false]]]
                         : $ages],
                     ['id' => 'gender', 'label' => 'Gender', 'type' => 'select', 'required' => true, 'options' => $genders],
-                    ['id' => 'meal', 'label' => 'Meal', 'type' => 'select', 'required' => true, 'options' => $meals],
+                    // In person and online: shown after "In person" (the form's field, outside the card).
+                    ...$mealFor(['id' => 'meal', 'label' => 'Meal', 'type' => 'select', 'required' => true, 'options' => $meals]),
                     ...$withMember($memberFields),
-                    $sellsMembership
-                        ? ['id' => 'email', 'label' => 'Email', 'type' => 'email', 'maxLength' => 255, 'required' => true, 'showWhen' => $member]
-                        : ['id' => 'email', 'label' => 'Email', 'type' => 'email', 'maxLength' => 255],
-                    // An adult's mobile (a child's is yours).
-                    ['id' => 'phone_code', 'label' => 'Country code', 'type' => 'select', 'required' => ! $admin, 'default' => '+91', 'options' => $codes, 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']],
-                    ['id' => 'phone', 'label' => 'Mobile', 'type' => 'tel', 'required' => ! $admin, 'maxLength' => 20, 'placeholder' => 'e.g. 98000 00000', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']],
+                    // Optional; needed for a guest joining as a member (the membership is theirs).
+                    ['id' => 'email', 'label' => 'Email', 'type' => 'email', 'maxLength' => 255] + ($sellsMembership ? ['requiredWhen' => $member] : []),
+                    // An adult's mobile (a child's is yours): optional; needed for a member.
+                    ['id' => 'phone_code', 'label' => 'Country code', 'type' => 'select', 'default' => '+91', 'options' => $codes, 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']],
+                    ['id' => 'phone', 'label' => 'Mobile', 'type' => 'tel', 'maxLength' => 20, 'placeholder' => 'e.g. 98000 00000', 'showWhen' => ['field' => 'age_group', 'equals' => 'adult']]
+                        + ($sellsMembership && ! $admin ? ['requiredWhen' => $member] : []),
                     ...($choice ? [array_diff_key($ticket, ['helperText' => 1])] : []),
                 ],
             ],

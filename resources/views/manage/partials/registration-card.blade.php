@@ -13,6 +13,7 @@
                 </div>
                 <div class="text-end">
                     <div class="fw-semibold">{{ $registration->statusLabel() }}</div>
+                    @if ($registration->attendLabel())<div><span class="badge text-bg-light border">{{ $registration->attendLabel() }}</span></div>@endif
                     @if ($order)
                         <div class="font-monospace">{{ $order->reference }}</div>
                         <div>{{ $money($order->total) }} · {{ $order->statusLabel() }}</div>
@@ -27,7 +28,7 @@
                         <tbody>
                             @foreach ($registration->people as $person)
                                 <tr>
-                                    <td>{{ $person['name'] ?? '' }} @if (($person['role'] ?? '') === 'registrant')<span class="badge text-bg-light">registrant</span>@endif
+                                    <td>{{ $person['name'] ?? '' }} @if (($person['role'] ?? '') === 'registrant')<span class="badge text-bg-light">registrant</span>@elseif (! empty($person['relation']))<span class="text-muted small">({{ \Iquesters\Event\Models\EventRegistration::RELATIONS[$person['relation']] ?? $person['relation'] }})</span>@endif
                                         {{-- Joining as a member: what they gave (e.g. their batch, "ISC 2005"). --}}
                                         @if (! empty($person['member_details']['summary']))<div class="text-muted">{{ $person['member_details']['summary'] }}</div>@endif</td>
                                     <td>{{ $person['ticket'] ?? '' }}</td>

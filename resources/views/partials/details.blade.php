@@ -25,9 +25,13 @@
                 <dt class="col-sm-3 text-muted fw-normal"><i class="fas fa-fw fa-location-dot"></i> Where</dt>
                 <dd class="col-sm-9" style="white-space: pre-line;">{{ $event->venue }}@if ($event->venue && $event->address){{ "\n" }}@endif{{ $event->address }}@if ($event->maps_url && ! $event->isOnline()) <a href="{{ $event->maps_url }}" target="_blank" rel="noopener nofollow" class="d-block small mt-1"><i class="fas fa-map"></i> Open in Maps</a>@endif</dd>
             @endif
-            @if ($event->online_url)
+            @if ($event->online_url && ($showOnlineLink ?? true))
                 <dt class="col-sm-3 text-muted fw-normal"><i class="fas fa-fw fa-video"></i> Online</dt>
                 <dd class="col-sm-9"><a href="{{ $event->online_url }}" target="_blank" rel="noopener nofollow">{{ $event->online_url }}</a></dd>
+            @elseif ($event->isHybrid())
+                {{-- In person and online: the link goes to those joining online, once registered. --}}
+                <dt class="col-sm-3 text-muted fw-normal"><i class="fas fa-fw fa-video"></i> Online</dt>
+                <dd class="col-sm-9 text-muted">You can also join online: choose Online when you register; the link comes by email.</dd>
             @endif
             @if ($event->registration_closes_at)
                 <dt class="col-sm-3 text-muted fw-normal"><i class="fas fa-fw fa-hourglass-end"></i> Register by</dt>

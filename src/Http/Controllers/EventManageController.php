@@ -175,7 +175,12 @@ class EventManageController extends Controller
             'veg' => $count($confirmed, 'veg'),
             'non_veg' => $count($confirmed, 'non_veg'),
             'paid' => $event->is_paid ? (float) $confirmed->sum(fn ($r) => (float) $r->order?->total) : null,
+            // In person and online: how many of the confirmed people come each way.
+            'online_people' => $event->isHybrid() ? (int) $confirmed->filter(fn ($r) => $r->attend_mode === EventRegistration::ATTEND_ONLINE)->sum(fn ($r) => 1 + (int) $r->guests) : null,
         ];
+        if ($totals['online_people'] !== null) {
+            $totals['in_person_people'] = $totals['confirmed_people'] - $totals['online_people'];
+        }
 
         return view('event::manage.attendees', [
             'event' => $event,
@@ -279,7 +284,8 @@ class EventManageController extends Controller
             'reference' => $order?->reference,
             'people' => $people,
             'people_label' => $people.' '.($people === 1 ? 'person' : 'people').($r->children ? ' ('.$r->children.' '.($r->children === 1 ? 'child' : 'children').')' : ''),
-            'meals' => $event->is_paid ? $r->veg.' veg · '.$r->non_veg.' non-veg' : null,
+            'meals' => $event->is_paid && ! ($event->isHybrid() && $r->attend_mode === EventRegistration::ATTEND_ONLINE) && ! $event->isOnline() ? $r->veg.' veg · '.$r->non_veg.' non-veg' : null,
+            'attend_label' => $event->isHybrid() ? EventRegistration::ATTEND_MODES[$r->attend_mode === EventRegistration::ATTEND_ONLINE ? EventRegistration::ATTEND_ONLINE : EventRegistration::ATTEND_IN_PERSON] : null,
             'total_label' => $order ? $money($order->total) : null,
             'donation_label' => (float) $r->donation > 0 ? 'Donation '.$money($r->donation) : null,
             'status' => $r->status,
@@ -369,7 +375,7 @@ class EventManageController extends Controller
             }
 
             // Paid: one row per person (the caterer's and the desk's list).
-            fputcsv($out, ['Reference', 'Status', 'Person', 'Registrant / guest', 'Gender', 'Age', 'Ticket', 'Meal', 'With membership', 'Email', 'Mobile', 'Registered by', 'Order total', 'Registered at'], ',', '"', '');
+            fputcsv($out, ['Reference', 'Status', 'Person', 'Registrant / guest', 'Relation', 'Attending', 'Gender', 'Age', 'Ticket', 'Meal', 'With membership', 'Email', 'Mobile', 'Registered by', 'Order total', 'Registered at'], ',', '"', '');
             foreach ($registrations as $registration) {
                 foreach ((array) $registration->people as $person) {
                     fputcsv($out, [
@@ -377,6 +383,8 @@ class EventManageController extends Controller
                         $registration->statusLabel(),
                         $person['name'] ?? '',
                         ($person['role'] ?? '') === 'registrant' ? 'Registrant' : 'Guest',
+                        EventRegistration::RELATIONS[$person['relation'] ?? ''] ?? '',
+                        $registration->attendLabel() ?? '',
                         EventRegistration::GENDERS[$person['gender'] ?? ''] ?? '',
                         ($person['age_group'] ?? 'adult') === 'child' ? 'Child' : 'Adult',
                         $person['ticket'] ?? '',
@@ -473,6 +481,7 @@ class EventManageController extends Controller
                 'limit' => $t['limit'] ?? null,
                 'includes' => $t['includes'] ?? null,
                 'for' => $t['for'] ?? 'everyone',
+                'attend' => $t['attend'] ?? 'both',
                 'admin_only' => (bool) ($t['admin_only'] ?? false),
             ])->values()->all(),
         ];
@@ -493,7 +502,7 @@ class EventManageController extends Controller
             // In person needs the venue; online needs the link.
             'venue' => ['nullable', 'string', 'max:255', 'required_unless:location_type,online'],
             'address' => ['nullable', 'string', 'max:1000'],
-            'online_url' => ['nullable', 'url:http,https', 'max:255', 'required_if:location_type,online'],
+            'online_url' => ['nullable', 'url:http,https', 'max:255', 'required_if:location_type,online,hybrid'],
             'visibility' => ['required', Rule::in($publicAllowed ? [Event::VISIBILITY_MEMBERS, Event::VISIBILITY_PUBLIC] : [Event::VISIBILITY_MEMBERS])],
             'status' => ['required', Rule::in(Event::STATUSES)],
             'registration_open' => ['nullable', 'boolean'],
@@ -516,6 +525,7 @@ class EventManageController extends Controller
             'tickets.*.limit' => ['nullable', 'integer', 'min:1', 'max:1000000'],
             'tickets.*.includes' => ['nullable', 'string', 'max:255'],
             'tickets.*.for' => ['nullable', Rule::in(EventProducts::FOR)],
+            'tickets.*.attend' => ['nullable', Rule::in(EventProducts::ATTEND)],
             'child_age' => ['nullable', 'integer', 'min:0', 'max:17'],
             'ask_donation' => ['nullable', 'boolean'],
             'with_membership' => ['nullable', 'boolean'],
@@ -550,9 +560,10 @@ class EventManageController extends Controller
             $data['venue'] = null;
             $data['address'] = null;
             $data['maps_url'] = null;
-        } else {
+        } elseif ($data['location_type'] === Event::LOCATION_IN_PERSON) {
             $data['online_url'] = null;
         }
+        // In person and online: the venue and the link both stay.
 
         return $data;
     }
