@@ -56,7 +56,7 @@
                             @if ($registration->guests) · {{ 1 + $registration->guests }} people @endif
                             @if ($registration->attendLabel()) · {{ $registration->attendLabel() }} @endif
                             {{-- Joining online and confirmed: their link. --}}
-                            @if ($registration->status === $R::STATUS_REGISTERED && $event->isHybrid() && $registration->attendsOnline() && $event->online_url)
+                            @if ($registration->status === $R::STATUS_REGISTERED && $event->isHybrid() && $registration->anyOnline() && $event->online_url)
                                 <div class="mt-1"><i class="fas fa-fw fa-video"></i> <a href="{{ $event->online_url }}" target="_blank" rel="noopener nofollow">Join online</a></div>
                             @endif
                             @if ($order)<div class="mt-1">Order <span class="font-monospace">{{ $order->reference }}</span> · {{ $money($order->total) }}</div>@endif
@@ -116,7 +116,7 @@
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <h5 class="fs-6 mb-1">Edit your details</h5>
-                    <p class="small text-muted mb-3">You can correct these until registration closes. Your ticket, who is an adult or a child, membership and the number of guests stay as they are.</p>
+                    <p class="small text-muted mb-3">You can correct these until registration closes. Your {{ \Iquesters\Event\Support\EventWords::t('ticket') }}, who is an adult or a child, membership and the number of guests stay as they are.</p>
                     @include('userinterface::components.form', ['id' => $editFormId, 'entity_uid' => $event->uid, 'formData' => json_encode($editFormData, JSON_UNESCAPED_UNICODE)])
                 </div>
             </div>
@@ -181,7 +181,7 @@
                     const json = await res.json();
                     if (mine !== seq || !json?.data) return;
                     const q = json.data;
-                    linesEl.replaceChildren(...q.lines.map(l => row(l.who + (l.ticket ? ' · ' + l.ticket : ''), l.price === null ? 'Choose a ticket' : (l.price > 0 ? money(l.price) : 'Free'), l.price === null)));
+                    linesEl.replaceChildren(...q.lines.map(l => row(l.who + (l.ticket ? ' · ' + l.ticket : ''), l.price === null ? @json(\Iquesters\Event\Support\EventWords::t('Choose a ticket')) : (l.price > 0 ? money(l.price) : 'Free'), l.price === null)));
                     if (q.donation > 0) linesEl.appendChild(row('Donation', money(q.donation)));
                     totalEl.textContent = money(q.total);
                 } catch (e) { /* the total stays as it was */ }

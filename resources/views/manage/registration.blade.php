@@ -18,7 +18,7 @@
         <div class="card border-0 shadow-sm" id="edit">
             <div class="card-body">
                 <h6 class="fs-6 mb-1">Correct the details</h6>
-                <p class="small text-muted mb-3">Names, mobiles, gender, meals and members' details. Each change is kept below. Tickets, adult or child, membership and the number of guests stay as they are.</p>
+                <p class="small text-muted mb-3">Names, mobiles, gender, meals and members' details. Each change is kept below. {{ \Iquesters\Event\Support\EventWords::t('Tickets') }}, adult or child, membership and the number of guests stay as they are.</p>
                 @include('userinterface::components.form', ['id' => $editFormId, 'entity_uid' => $registration->uid, 'formData' => json_encode($editFormData, JSON_UNESCAPED_UNICODE)])
             </div>
         </div>

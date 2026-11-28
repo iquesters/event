@@ -345,8 +345,10 @@ class Event extends Model
     {
         return (int) $this->registrations()
             ->whereIn('status', EventRegistration::ACTIVE_STATUSES)
-            ->when($this->isHybrid(), fn ($q) => $q->where(fn ($q) => $q->whereNull('attend_mode')->orWhere('attend_mode', '!=', EventRegistration::ATTEND_ONLINE)))
-            ->sum(DB::raw('1 + guests'));
+            // In person and online: only the people coming in person (registered before each chose: the registrant's way).
+            ->sum(DB::raw($this->isHybrid()
+                ? "CASE WHEN attend_mode = '".EventRegistration::ATTEND_ONLINE."' AND online_people = 0 THEN 0 ELSE GREATEST(0, CAST(guests AS SIGNED) + 1 - CAST(online_people AS SIGNED)) END"
+                : '1 + guests'));
     }
 
     /** A paid-registration setting (paid_settings), with its default. */

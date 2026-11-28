@@ -38,7 +38,7 @@
             <div class="card border-0 shadow-sm">
                 <div class="card-body">
                     <h6 class="fs-6 mb-1">Add attendee</h6>
-                    <p class="small text-muted mb-3">For crew and invited guests pick their admin-only ticket (e.g. Crew ₹0). Otherwise an order is made: record the cash in Payments → Record a payment (its reference is shown after adding), or send them the pay link from their registration.</p>
+                    <p class="small text-muted mb-3">For crew and invited guests pick their admin-only {{ \Iquesters\Event\Support\EventWords::t('ticket') }} (e.g. Crew ₹0). Otherwise an order is made: record the cash in Payments → Record a payment (its reference is shown after adding), or send them the pay link from their registration.</p>
                     @include('userinterface::components.form', ['id' => $addFormId, 'entity_uid' => $event->uid, 'formData' => json_encode(['guests' => []])])
                 </div>
             </div>

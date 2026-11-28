@@ -5,6 +5,17 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Changed (in person and online: each guest chooses)
+- **Each guest says how they attend** (*Attending: In person / Online* on their card); the registrant answers at the top. A person's meal is asked only when they come in person, and each gets the passes for their own way (the total follows).
+- Places count only those coming in person; meals and the veg / non-veg counts too. New column `online_people` (migration `2026_11_30_000011_add_online_people_to_event_registrations`, a column only); registrations made before count everyone the registrant's way.
+- The registrant gets the online link when anyone in the registration joins online (*N joining online*); a registration with people coming in person also gets the usual confirmation.
+- The attendees list shows *In person*, *Online* or *2 in person · 1 online*; the card and the CSV show each person's own way.
+- The edit form lets the registrant and each guest switch, each when their pass is for both ways; the history says who switched.
+
+### Added (your word for "ticket")
+- **Settings `ticket_word` / `ticket_word_plural`** (default *ticket* / *tickets*): what people get for an event, in the app's own word, e.g. *pass* / *passes*. Every text people read uses it: the event and registration forms (labels, help, buttons), the event pages (*Passes available*, *Get passes*, *Only 3 passes left*), messages (*Choose one of this event's passes.*), the attendees CSV column and the registration card. Ids, field names and stored data stay *ticket*. `EventWords::t()` puts the word into a text, keeping its capital.
+- The ticket name's example is now *e.g. Standard*.
+
 ### Added (in person and online events)
 - **Where: In person and online** (`location_type` `hybrid`): the venue, address, map and the online link together.
 - **How will you attend? In person / Online** first on the registration form (and the add-attendee form), once per registration: the guests attend the same way. Kept as `attend_mode` (migration `2026_11_30_000010_add_attend_mode_to_event_registrations`, a column only).

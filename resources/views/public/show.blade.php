@@ -130,9 +130,9 @@
                         @if ($limited && $left === 0)
                             <i class="fas fa-circle-xmark text-danger"></i><span class="text-danger">Sold out</span>
                         @elseif ($limited && $left <= 10)
-                            <i class="fas fa-fire text-warning"></i><span>Only {{ $left }} {{ $left === 1 ? 'ticket' : 'tickets' }} left</span>
+                            <i class="fas fa-fire text-warning"></i><span>Only {{ $left }} {{ \Iquesters\Event\Support\EventWords::t($left === 1 ? 'ticket' : 'tickets') }} left</span>
                         @else
-                            <i class="fas fa-ticket" style="color: var(--theme-from);"></i><span>Tickets available</span>
+                            <i class="fas fa-ticket" style="color: var(--theme-from);"></i><span>{{ \Iquesters\Event\Support\EventWords::t('Tickets available') }}</span>
                         @endif
                     </div>
                 @endif
@@ -145,9 +145,9 @@
                 @else
                     <p class="small text-muted mb-3">
                         @if ($event->capacity !== null){{ $event->seatsLeft() }} of {{ $event->capacity }} places left. @endif
-                        {{ $event->is_paid ? 'Sign in to see the tickets and prices, register yourself and your guests, then pay by UPI.' : 'Sign in and register; bring guests if you like.' }}
+                        {{ $event->is_paid ? \Iquesters\Event\Support\EventWords::t('Sign in to see the tickets and prices, register yourself and your guests, then pay by UPI.') : 'Sign in and register; bring guests if you like.' }}
                     </p>
-                    <a href="{{ route('events.show', ['uid' => $event->uid, 'register' => 1]) }}" class="btn btn-theme w-100">{{ $event->is_paid ? 'Get tickets' : 'Register' }}</a>
+                    <a href="{{ route('events.show', ['uid' => $event->uid, 'register' => 1]) }}" class="btn btn-theme w-100">{{ $event->is_paid ? \Iquesters\Event\Support\EventWords::t('Get tickets') : 'Register' }}</a>
                     @if ($event->registration_closes_at)
                         <div class="small text-muted text-center mt-2">Registration closes {{ $event->registration_closes_at->format('j M Y, g:i A') }}</div>
                     @endif
